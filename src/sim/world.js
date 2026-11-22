@@ -34,7 +34,11 @@ export function createWorld(seed) {
 /** Adds a player for slot 0 or 1 at its spawn point and returns it. */
 export function addPlayer(world, slot) {
   const sp = world.spawns[slot % world.spawns.length];
-  return addEntity(world, createPlayer(slot, sp.x, sp.y));
+  return addEntity(world, createPlayer(world, slot, sp.x, sp.y));
+}
+
+export function removePlayer(world, slot) {
+  world.entities = world.entities.filter((e) => !(e.type === "player" && e.slot === slot));
 }
 
 export function findPlayer(world, slot) {

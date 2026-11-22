@@ -21,7 +21,10 @@ export function createInput(canvas, viewW, viewH) {
   const latched = new Set();
   const mouse = { x: viewW / 2, y: viewH / 2, left: false, right: false };
 
+  const typing = (e) => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+
   window.addEventListener("keydown", (e) => {
+    if (typing(e)) return; // lobby text fields
     if (BLOCK_DEFAULT.has(e.code)) e.preventDefault();
     if (!e.repeat) {
       pressed.add(e.code);

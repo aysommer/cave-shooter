@@ -7,9 +7,14 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/sim-determinism.mjs"
+    "signal": "node server/signal/index.js",
+    "test": "node scripts/sim-determinism.mjs && node scripts/netcode-test.mjs",
+    "postinstall": "npm --prefix server/signal ci --omit=dev --no-audit --no-fund"
   },
   "devDependencies": {
     "vite": "8.3.6"
+  },
+  "dependencies": {
+    "peerjs": "1.5.5"
   }
 }

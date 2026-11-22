@@ -16,9 +16,9 @@ export function stepBullet(world, b) {
   if (isSolidAt(world.map, cx, cy)) {
     b.dead = true;
     // Report the point just before entering the wall, for sparks.
-    world.events.push({ type: "bulletWall", x: cx - b.vx * 0.5, y: cy - b.vy * 0.5 });
+    world.events.push({ type: "bulletWall", owner: b.owner, x: cx - b.vx * 0.5, y: cy - b.vy * 0.5 });
   } else if (b.life <= 0) {
     b.dead = true;
-    world.events.push({ type: "bulletFade", x: cx, y: cy });
+    world.events.push({ type: "bulletFade", owner: b.owner, x: cx, y: cy });
   }
 }

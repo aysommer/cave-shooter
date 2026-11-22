@@ -12,6 +12,9 @@ const PAL = {
   b: "#4a2416", // paws
 };
 
+// Temporary recolor for the second player until the other heroes exist.
+export const FOX_PALETTE_P2 = { O: "#8fb3e0", d: "#5a77a8", b: "#283a5c" };
+
 // Rows 0–12: head, body and tail.
 const BODY = [
   "................",
@@ -45,7 +48,8 @@ function frame(body, legs) {
   return [...body, ...legs];
 }
 
-export function buildFoxSprites() {
+export function buildFoxSprites(paletteOverride = {}) {
+  const pal = { ...PAL, ...paletteOverride };
   const idle = [frame(BODY, LEGS.stand), frame(bob(BODY), LEGS.stand)];
   const run = [
     frame(BODY, LEGS.wide),
@@ -54,7 +58,7 @@ export function buildFoxSprites() {
     frame(bob(BODY), LEGS.stand),
   ];
   const make = (rows) => {
-    const right = buildSprite(rows, PAL);
+    const right = buildSprite(rows, pal);
     return { right, left: flipH(right) };
   };
   return { idle: idle.map(make), run: run.map(make) };

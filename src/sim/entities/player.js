@@ -1,10 +1,10 @@
 import { PLAYER, BULLET_SIZE } from "../constants.js";
 import { WEAPONS } from "../../data/weapons.js";
 import { moveAndCollide, isSolidAt } from "../level/tilemap.js";
-import { rngRange } from "../../core/rng.js";
+import { createRng, rngRange } from "../../core/rng.js";
 import { spawnBullet } from "./bullet.js";
 
-export function createPlayer(slot, cx, cy) {
+export function createPlayer(world, slot, cx, cy) {
   return {
     type: "player",
     slot,
@@ -20,6 +20,9 @@ export function createPlayer(slot, cx, cy) {
     // the input layer) so a lost network packet cannot cause a double shot.
     prevFire: false,
     prevSwap: false,
+    // Own RNG for weapon spread. It depends only on this player's shots, so
+    // the guest can predict its own pellets exactly like the host fires them.
+    rng: createRng((world.seed ^ Math.imul(slot + 1, 0x9e3779b1)) >>> 0),
   };
 }
 
@@ -43,7 +46,7 @@ export function stepPlayer(world, p, input) {
   if (input.swap && !p.prevSwap && p.weapons.length > 1) {
     p.wi = (p.wi + 1) % p.weapons.length;
     p.cooldown = Math.max(p.cooldown, PLAYER.swapDelay);
-    world.events.push({ type: "swap", slot: p.slot, weapon: p.weapons[p.wi] });
+    world.events.push({ type: "swap", owner: p.slot, weapon: p.weapons[p.wi] });
   }
   p.prevSwap = input.swap;
 
@@ -63,7 +66,7 @@ function fire(world, p, weapon) {
   const mx = hx + Math.cos(p.aim) * PLAYER.barrel;
   const my = hy + Math.sin(p.aim) * PLAYER.barrel;
 
-  world.events.push({ type: "shot", slot: p.slot, x: mx, y: my, angle: p.aim, weapon: p.weapons[p.wi] });
+  world.events.push({ type: "shot", owner: p.slot, x: mx, y: my, angle: p.aim, weapon: p.weapons[p.wi] });
 
   // Recoil
   p.vx -= Math.cos(p.aim) * weapon.recoil;
@@ -71,13 +74,13 @@ function fire(world, p, weapon) {
 
   // Muzzle inside a wall (player hugging it): the shot hits the wall at once.
   if (isSolidAt(world.map, mx, my)) {
-    world.events.push({ type: "bulletWall", x: hx, y: hy });
+    world.events.push({ type: "bulletWall", owner: p.slot, x: hx, y: hy });
     return;
   }
 
   for (let i = 0; i < weapon.count; i++) {
-    const angle = p.aim + rngRange(world.rng, -weapon.spread, weapon.spread);
-    const speed = weapon.speed * (1 + rngRange(world.rng, -weapon.speedVar, weapon.speedVar));
+    const angle = p.aim + rngRange(p.rng, -weapon.spread, weapon.spread);
+    const speed = weapon.speed * (1 + rngRange(p.rng, -weapon.speedVar, weapon.speedVar));
     spawnBullet(world, {
       owner: p.slot,
       x: mx - BULLET_SIZE / 2,

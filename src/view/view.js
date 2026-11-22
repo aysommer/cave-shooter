@@ -4,7 +4,7 @@
 import { VIEW_W, VIEW_H, TILE, PLAYER } from "../sim/constants.js";
 import { T_WALL, tileAt } from "../sim/level/tilemap.js";
 import { WEAPONS } from "../data/weapons.js";
-import { buildFoxSprites } from "./sprites/fox.js";
+import { buildFoxSprites, FOX_PALETTE_P2 } from "./sprites/fox.js";
 import { buildWeaponSprites } from "./sprites/weapons.js";
 
 const COLORS = {
@@ -20,6 +20,7 @@ const COLORS = {
   bulletTrail: "#ffb43d",
   spark: ["#ffd27a", "#fff3b0", "#ff9a3d"],
   crosshair: "#ffffff",
+  tag: ["#f2a65a", "#8fb3e0"],
 };
 
 const CAMERA = {
@@ -43,7 +44,8 @@ function tileHash(tx, ty, seed) {
 
 export function createView(renderer) {
   const ctx = renderer.ctx;
-  const fox = buildFoxSprites();
+  // Per player slot. Real hero choice comes in stage 9.
+  const heroSprites = [buildFoxSprites(), buildFoxSprites(FOX_PALETTE_P2)];
   const guns = buildWeaponSprites();
 
   const camera = { x: 0, y: 0, ready: false };
@@ -159,7 +161,8 @@ export function createView(renderer) {
     ctx.restore();
   }
 
-  function drawPlayer(world, p, alpha) {
+  function drawPlayer(world, p, alpha, showTag) {
+    const fox = heroSprites[p.slot] ?? heroSprites[0];
     const pos = drawPos(p, alpha);
     const cx = pos.x + p.w / 2 - cam.x;
     const feet = pos.y + p.h - cam.y;
@@ -178,6 +181,11 @@ export function createView(renderer) {
     if (gunBehind) drawWeapon(p, hx, hy, facingLeft);
     ctx.drawImage(img, Math.round(cx - 8), Math.round(feet - 15));
     if (!gunBehind) drawWeapon(p, hx, hy, facingLeft);
+
+    if (showTag) {
+      const tag = `P${p.slot + 1}`;
+      renderer.text(tag, Math.round(cx - renderer.measureText(tag).w / 2), Math.round(feet - 23), COLORS.tag[p.slot] ?? "#fff");
+    }
   }
 
   function drawBullet(b, alpha) {
@@ -194,7 +202,7 @@ export function createView(renderer) {
     for (const ev of events) {
       if (ev.type === "shot") {
         fx.push({ kind: "flash", x: ev.x, y: ev.y, life: 3, max: 3 });
-        gunKick[ev.slot] = WEAPONS[ev.weapon].recoil > 1 ? 3 : 2;
+        gunKick[ev.owner] = WEAPONS[ev.weapon].recoil > 1 ? 3 : 2;
       } else if (ev.type === "bulletWall") {
         for (let i = 0; i < 4; i++) {
           const a = Math.random() * Math.PI * 2;
@@ -270,9 +278,9 @@ export function createView(renderer) {
       return { x: x - cam.x, y: y - cam.y };
     },
 
-    /** Called after every simulation tick. */
-    onTick(world) {
-      onEvents(world.events);
+    /** Called after every simulation tick with the events of that tick. */
+    onTick(events) {
+      onEvents(events);
       tickEffects();
     },
 
@@ -294,7 +302,7 @@ export function createView(renderer) {
 
       // Draw lower entities last so they overlap the ones behind them.
       const players = world.entities.filter((e) => e.type === "player").sort((a, b) => a.y - b.y);
-      for (const p of players) drawPlayer(world, p, alpha);
+      for (const p of players) drawPlayer(world, p, alpha, players.length > 1);
       for (const e of world.entities) if (e.type === "bullet") drawBullet(e, alpha);
       drawEffects();
 

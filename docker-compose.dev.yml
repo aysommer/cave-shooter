@@ -1,0 +1,65 @@
+# Local network infrastructure for development:
+#   signal — PeerJS signaling + temporary TURN credentials (port 9000)
+#   turn   — coturn STUN/TURN relay (3478 UDP/TCP, relay ports 49160-49200 UDP)
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   npm run dev            # sees port 9000 busy and uses the container
+#
+# No Node on the machine? Also start the game client in a container:
+#   docker compose -f docker-compose.dev.yml --profile web up
+#
+# Settings come from .env (see deploy/.env.example); defaults work on one machine.
+
+name: cave-shooter-dev
+
+services:
+  signal:
+    build: ./server/signal
+    environment:
+      PORT: "9000"
+      TURN_URLS: "turn:${TURN_HOST:-localhost}:3478?transport=udp,turn:${TURN_HOST:-localhost}:3478?transport=tcp"
+      TURN_SECRET: ${TURN_SECRET:-dev-secret-change-me}
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+
+  turn:
+    image: coturn/coturn:4.6.3
+    # Host networking: Docker port mapping copes badly with UDP relay ranges.
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:-dev-secret-change-me}
+      - --realm=cave-shooter.local
+      - --fingerprint
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      # Address the relay binds to and advertises. Dev on one machine: 127.0.0.1;
+      # dev over a LAN: this machine's LAN IP. (Production behind NAT uses
+      # --external-ip instead, see stage 10.)
+      - --relay-ip=${TURN_RELAY_IP:-127.0.0.1}
+      # Dev only: lets two browsers on the same machine relay to each other.
+      - --allow-loopback-peers
+    restart: unless-stopped
+
+  web:
+    profiles: ["web"]
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm ci --no-audit --no-fund && npx vite --host 0.0.0.0"
+    environment:
+      SIGNAL: "0"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/server/signal/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - signal
