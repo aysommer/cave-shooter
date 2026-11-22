@@ -9,7 +9,7 @@ import { WEAPONS, WEAPON_IDS, AMMO, AMMO_TYPES } from "../src/data/weapons.js";
 import { maxTier } from "../src/data/loot.js";
 import { emptyInput } from "../src/sim/input-frame.js";
 import { TILE, PLAYER } from "../src/sim/constants.js";
-import { T_WALL, T_FLOOR } from "../src/sim/level/tilemap.js";
+import { T_WALL, T_FLOOR, rectHitsSolid } from "../src/sim/level/tilemap.js";
 import { hashTiles } from "../src/sim/level/generate.js";
 
 let failed = 0;
@@ -195,6 +195,22 @@ for (const [id, predict] of [["sledgehammer", false], ["rocketlauncher", false],
     w.entities = w.entities.filter((x) => !x.dead || x.type === "player");
   }
   check(`300 kills: ${ammo} ammo drops (${[...types].join(", ")}), ${health} health drops`, ammo > 60 && health > 5 && [...types].every((t) => t === "bullet" || t === "shell"));
+}
+
+// 12. Items never end up inside walls.
+{
+  const { w, p } = arena({ wallAt: 6 });
+  const wallX = 6 * TILE;
+  const items = [
+    spawnPickup(w, "ammo", wallX + 2, p.y + 5, { ammo: "bullet" }), // centre inside the wall column
+    spawnPickup(w, "health", wallX - 2, p.y + 5), // pokes into the wall
+    spawnPickup(w, "weapon", wallX + 8, p.y + 30, { weapon: "smg" }),
+    spawnChest(w, "weapon", wallX + 4, p.y - 20),
+    spawnPickup(w, "ammo", 3, 3, { ammo: "shell" }), // in the corner rock
+  ];
+  const stuck = items.filter((e) => rectHitsSolid(w.map, e.x, e.y, e.w, e.h)).length;
+  check(`items pushed out of walls (${stuck} of ${items.length} still in rock)`, stuck === 0);
+
 }
 
 process.exit(failed ? 1 : 0);

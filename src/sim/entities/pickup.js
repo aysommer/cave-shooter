@@ -6,13 +6,52 @@ import { DROPS, CHESTS, maxTier, PICKUP_RANGE } from "../../data/loot.js";
 import { rngFloat, rngPick, rngRange } from "../../core/rng.js";
 import { addEntity } from "../entity.js";
 import { overlaps, centerX, centerY } from "../combat.js";
+import { rectHitsSolid, tileAt, T_FLOOR } from "../level/tilemap.js";
+import { lineOfSight } from "../ai/nav.js";
+import { TILE } from "../constants.js";
+
+/**
+ * Items must never sit in (or poke into) a wall: drops near walls and chest
+ * contents scattered around get pushed out to the nearest free spot. Tries
+ * small nudges first, then the centre of the nearest floor tile.
+ */
+export function placeOnFloor(world, e) {
+  const map = world.map;
+  if (!rectHitsSolid(map, e.x, e.y, e.w, e.h)) return;
+  const x0 = e.x;
+  const y0 = e.y;
+  for (let r = 1; r <= 12; r++) {
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const x = x0 + Math.round(Math.cos(a) * r);
+      const y = y0 + Math.round(Math.sin(a) * r);
+      if (!rectHitsSolid(map, x, y, e.w, e.h)) {
+        e.x = e.px = x;
+        e.y = e.py = y;
+        return;
+      }
+    }
+  }
+  const tx0 = Math.floor((x0 + e.w / 2) / TILE);
+  const ty0 = Math.floor((y0 + e.h / 2) / TILE);
+  for (let r = 0; r <= 6; r++) {
+    for (let ty = ty0 - r; ty <= ty0 + r; ty++) {
+      for (let tx = tx0 - r; tx <= tx0 + r; tx++) {
+        if (tileAt(map, tx, ty) !== T_FLOOR) continue;
+        e.x = e.px = tx * TILE + TILE / 2 - e.w / 2;
+        e.y = e.py = ty * TILE + TILE / 2 - e.h / 2;
+        return;
+      }
+    }
+  }
+}
 
 const SIZE = { ammo: 7, health: 7, weapon: 12 };
 
 /** kind: "ammo" (with ammo type), "health" or "weapon" (with weapon id). */
 export function spawnPickup(world, kind, cx, cy, extra = {}) {
   const s = SIZE[kind];
-  return addEntity(world, {
+  const e = addEntity(world, {
     type: "pickup",
     kind,
     x: cx - s / 2,
@@ -22,10 +61,14 @@ export function spawnPickup(world, kind, cx, cy, extra = {}) {
     life: kind === "weapon" ? -1 : DROPS.life, // weapons never disappear
     ...extra,
   });
+  placeOnFloor(world, e);
+  return e;
 }
 
 export function spawnChest(world, kind, cx, cy) {
-  return addEntity(world, { type: "chest", kind, x: cx - 6, y: cy - 4, w: 12, h: 9 });
+  const e = addEntity(world, { type: "chest", kind, x: cx - 6, y: cy - 4, w: 12, h: 9 });
+  placeOnFloor(world, e);
+  return e;
 }
 
 const alivePlayers = (world) => world.entities.filter((e) => e.type === "player" && !e.dead);
@@ -106,7 +149,8 @@ export function weaponInReach(world, p) {
   for (const e of world.entities) {
     if (e.type !== "pickup" || e.kind !== "weapon" || e.dead) continue;
     const d = Math.hypot(centerX(e) - centerX(p), centerY(e) - centerY(p));
-    if (d < bestD) {
+    // No grabbing through a wall.
+    if (d < bestD && lineOfSight(world.map, centerX(p), centerY(p), centerX(e), centerY(e))) {
       bestD = d;
       best = e;
     }
