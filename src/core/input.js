@@ -1,0 +1,78 @@
+// Local keyboard + mouse input.
+//
+// Uses KeyboardEvent.code (physical keys), so WASD works with any keyboard
+// layout, including Russian.
+
+import { emptyInput } from "../sim/input-frame.js";
+
+const LEFT = ["KeyA", "ArrowLeft"];
+const RIGHT = ["KeyD", "ArrowRight"];
+const UP = ["KeyW", "ArrowUp"];
+const DOWN = ["KeyS", "ArrowDown"];
+
+// Keys whose default browser action we suppress (scrolling, help, etc.).
+const BLOCK_DEFAULT = new Set(["F1", "Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+
+export function createInput(canvas, viewW, viewH) {
+  const down = new Set();
+  const pressed = new Set(); // keys pressed since last consumePressed()
+  const mouse = { x: viewW / 2, y: viewH / 2, left: false, right: false };
+
+  window.addEventListener("keydown", (e) => {
+    if (BLOCK_DEFAULT.has(e.code)) e.preventDefault();
+    if (!e.repeat) pressed.add(e.code);
+    down.add(e.code);
+  });
+  window.addEventListener("keyup", (e) => down.delete(e.code));
+  // Losing focus would otherwise leave keys "stuck" down.
+  window.addEventListener("blur", () => {
+    down.clear();
+    mouse.left = mouse.right = false;
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    const r = canvas.getBoundingClientRect();
+    mouse.x = ((e.clientX - r.left) / r.width) * viewW;
+    mouse.y = ((e.clientY - r.top) / r.height) * viewH;
+  });
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.button === 0) mouse.left = true;
+    if (e.button === 2) mouse.right = true;
+  });
+  window.addEventListener("mouseup", (e) => {
+    if (e.button === 0) mouse.left = false;
+    if (e.button === 2) mouse.right = false;
+  });
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+  const any = (codes) => codes.some((c) => down.has(c));
+
+  return {
+    mouse,
+
+    /**
+     * Builds the InputFrame for this tick.
+     * @param {{x:number,y:number}|null} origin  screen-space point to aim from (player center)
+     */
+    sample(origin) {
+      const f = emptyInput();
+      f.moveX = (any(RIGHT) ? 1 : 0) - (any(LEFT) ? 1 : 0);
+      f.moveY = (any(DOWN) ? 1 : 0) - (any(UP) ? 1 : 0);
+      if (origin) f.aim = Math.atan2(mouse.y - origin.y, mouse.x - origin.x);
+      f.fire = mouse.left;
+      f.alt = mouse.right;
+      return f;
+    },
+
+    /** true once per physical key press (for UI / debug toggles). */
+    consumePressed(code) {
+      if (!pressed.has(code)) return false;
+      pressed.delete(code);
+      return true;
+    },
+
+    endFrame() {
+      pressed.clear();
+    },
+  };
+}
