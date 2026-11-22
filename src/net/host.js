@@ -13,7 +13,11 @@ export const GUEST_SLOT = 1;
 /** A guest that dropped keeps its hero this long, waiting to reconnect. */
 export const RECONNECT_GRACE_MS = 30000;
 
-export async function startHost({ getSeed }) {
+/**
+ * @param {{ getWelcome: () => object }} opts  getWelcome returns what a joining
+ *   guest needs to rebuild the world: seed, depth, map hash, tile changes.
+ */
+export async function startHost({ getWelcome }) {
   const ice = await fetchIceServers();
   let peer = null;
   let code = null;
@@ -74,7 +78,7 @@ export async function startHost({ getSeed }) {
         // The guest tells us where its input numbering continues.
         queue: createInputQueue(msg.nextSeq),
       });
-      t.send({ t: "welcome", slot: GUEST_SLOT, seed: getSeed(), v: PROTOCOL_VERSION });
+      t.send({ t: "welcome", slot: GUEST_SLOT, v: PROTOCOL_VERSION, ...getWelcome() });
       handlers.join(GUEST_SLOT, returning);
       handlers.status(status());
     });
@@ -138,6 +142,11 @@ export async function startHost({ getSeed }) {
         return emptyInput();
       }
       return guest.queue.take();
+    },
+
+    /** Reliable message to the guest (level changes, broken walls). */
+    send(msg) {
+      if (guest.connected) guest.transport.send(msg);
     },
 
     sendSnapshot(world, events) {

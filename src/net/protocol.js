@@ -10,7 +10,7 @@
 
 import { WEAPONS } from "../data/weapons.js";
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export const MSG_INPUT = 1;
 export const MSG_SNAPSHOT = 2;
@@ -21,7 +21,7 @@ export const INPUT_REDUNDANCY = 6;
 const WEAPON_IDS = Object.keys(WEAPONS);
 const weaponIndex = (id) => Math.max(0, WEAPON_IDS.indexOf(id));
 
-const EVENT_TYPES = ["shot", "bulletWall", "bulletFade", "swap"];
+const EVENT_TYPES = ["shot", "bulletWall", "bulletFade", "swap", "wallBroken", "levelStart"];
 
 // ---- quantization ---------------------------------------------------------
 
@@ -144,6 +144,8 @@ export function encodeSnapshot(world, ack, events) {
   w.u8(MSG_SNAPSHOT);
   w.u32(world.tick);
   w.u32(ack);
+  w.u16(world.depth);
+  w.u8(Math.min(255, world.level.portal.charge));
 
   w.u8(players.length);
   for (const p of players) {
@@ -190,6 +192,8 @@ export function decodeSnapshot(buf) {
   if (r.u8() !== MSG_SNAPSHOT) throw new Error("not a snapshot packet");
   const tick = r.u32();
   const ack = r.u32();
+  const depth = r.u16();
+  const portalCharge = r.u8();
 
   const players = [];
   for (let i = 0, n = r.u8(); i < n; i++) {
@@ -236,5 +240,5 @@ export function decodeSnapshot(buf) {
     events.push({ tick: evTick, ev });
   }
 
-  return { tick, ack, players, bullets, events, bytes: buf.byteLength };
+  return { tick, ack, depth, portalCharge, players, bullets, events, bytes: buf.byteLength };
 }

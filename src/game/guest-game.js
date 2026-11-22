@@ -8,11 +8,16 @@
 //    appear instantly. The host's copies of them are not drawn.
 //  - Everything else: drawn ~100 ms in the past, interpolated between the
 //    two snapshots around that moment, so it moves smoothly despite jitter.
+//  - Levels: generated locally from (seed, depth), like on the host. Snapshots
+//    carry the depth; broken walls come over the reliable channel. The map
+//    hash from the host confirms both sides built the same cave.
 
 import { PLAYER, TICK_RATE } from "../sim/constants.js";
 import { createWorld, findPlayer, removePlayer, step } from "../sim/world.js";
 import { addEntity } from "../sim/entity.js";
 import { stepPlayer } from "../sim/entities/player.js";
+import { setTile } from "../sim/level/level.js";
+import { hashTiles } from "../sim/level/generate.js";
 import { INPUT_REDUNDANCY, roundAim } from "../net/protocol.js";
 
 const TICKS_PER_MS = TICK_RATE / 1000;
@@ -35,7 +40,10 @@ const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevS
 
 export function createGuestGame({ session, input, view }) {
   let slot = session.slot;
-  let local = createWorld(session.seed);
+  let local = null;
+  const expectedHash = new Map(); // depth -> map hash announced by the host
+  let futureTiles = []; // tile changes for a level we have not entered yet
+  let mapCheck = "WAIT";
   let seq = 0;
   let pending = []; // inputs not yet acknowledged by the host
   let snaps = []; // received snapshots, oldest first
@@ -46,18 +54,54 @@ export function createGuestGame({ session, input, view }) {
   let lastInput = null;
   let lastDisplay = null;
 
-  const stats = { corrections: 0, lastCorrection: 0, snapBytes: [], lateSnaps: 0 };
+  const stats = { corrections: 0, lastCorrection: 0, snapBytes: [], lateSnaps: 0, levels: 0 };
 
-  session.onWelcome((msg) => {
-    if (msg.seed !== local.seed) {
-      // The host restarted with a new world: start over.
-      local = createWorld(msg.seed);
-      slot = msg.slot;
-      snaps = [];
-      lastSnapTick = -1;
-      pending = [];
-      remoteEvents = [];
-      view.reset();
+  /** Builds the local world for `depth` and applies known wall changes. */
+  function enterLevel(seed, depth, tileChanges = []) {
+    local = createWorld(seed, depth);
+    for (const [tx, ty, t] of tileChanges) setTile(local, tx, ty, t);
+    const ready = futureTiles.filter((c) => c.depth === depth);
+    futureTiles = futureTiles.filter((c) => c.depth > depth);
+    for (const c of ready) applyTiles(c.changes);
+    snaps = snaps.filter((sn) => sn.depth === depth);
+    remoteEvents = [];
+    smooth.x = smooth.y = 0;
+    stats.levels++;
+    checkMap();
+    view.reset();
+  }
+
+  function checkMap() {
+    const want = expectedHash.get(local.depth);
+    if (want === undefined) mapCheck = "WAIT";
+    else mapCheck = want === local.level.mapHash ? "OK" : "MISMATCH";
+    if (mapCheck === "MISMATCH") console.error(`[guest] map desync on level ${local.depth}: ${local.level.mapHash} vs host ${want}`);
+  }
+
+  function applyTiles(changes) {
+    for (const [tx, ty, t] of changes) setTile(local, tx, ty, t);
+  }
+
+  function applyWelcome(msg) {
+    slot = msg.slot;
+    expectedHash.set(msg.depth, msg.mapHash);
+    pending = [];
+    lastSnapTick = -1;
+    snaps = [];
+    enterLevel(msg.seed, msg.depth, msg.tileChanges ?? []);
+  }
+  applyWelcome(session.welcome);
+
+  // After a reconnect the host may be on another level (or a new world).
+  session.onWelcome(applyWelcome);
+
+  session.onMessage((msg) => {
+    if (msg.t === "level") {
+      expectedHash.set(msg.depth, msg.mapHash);
+      if (msg.depth === local.depth) checkMap();
+    } else if (msg.t === "tiles") {
+      if (msg.depth === local.depth) applyTiles(msg.changes);
+      else if (msg.depth > local.depth) futureTiles.push({ depth: msg.depth, changes: msg.changes });
     }
   });
 
@@ -67,6 +111,8 @@ export function createGuestGame({ session, input, view }) {
       return; // older than what we have (unordered channel)
     }
     lastSnapTick = snap.tick;
+    if (snap.depth !== local.depth) enterLevel(local.seed, snap.depth);
+    local.level.portal.charge = snap.portalCharge;
     snaps.push(snap);
     if (snaps.length > 32) snaps.shift();
 
@@ -244,9 +290,13 @@ export function createGuestGame({ session, input, view }) {
           entities.push(focus);
         } else entities.push(e);
       }
-      const display = { seed: local.seed, map: local.map, tick: local.tick, entities, events: [] };
+      const display = { seed: local.seed, map: local.map, tick: local.tick, depth: local.depth, level: local.level, entities, events: [] };
       lastDisplay = display;
       view.render(display, alpha, mouse, focus);
+    },
+
+    get mapCheck() {
+      return mapCheck;
     },
 
     nextSeq() {
@@ -257,6 +307,7 @@ export function createGuestGame({ session, input, view }) {
       const s = session.netStats();
       return {
         lines: [
+          `LEVEL ${local.depth} MAP ${local.map.w}X${local.map.h} HASH ${hashTiles(local.map).toString(16).toUpperCase()} ${mapCheck}`,
           `NET ${s.role} ${session.status().state.toUpperCase()}`,
           `RTT ${Math.round(s.rtt)}MS  IN ${s.kbIn.toFixed(1)}K/S OUT ${s.kbOut.toFixed(1)}K/S`,
           `PENDING ${pending.length}  FIX ${stats.corrections} LAST ${stats.lastCorrection.toFixed(1)}PX`,

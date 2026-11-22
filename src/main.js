@@ -40,6 +40,7 @@ function run(newGame, { network }) {
       if (input.consumePressed("F1")) debug.toggle();
       if (input.consumePressed("F2")) cycleLinkSim();
       if (input.consumePressed("KeyR")) game.restart();
+      if (input.consumePressed("KeyN")) game.skipLevel?.();
       game.update();
       debug.onTick(game.world);
       input.endFrame();
@@ -59,7 +60,7 @@ lobby.onHost(async () => {
   lobby.busy("Создаём комнату…");
   try {
     let localGame = null;
-    session = await startHost({ getSeed: () => localGame.world.seed });
+    session = await startHost({ getWelcome: () => localGame.welcomeInfo() });
     localGame = createLocalGame({ seed, input, view, host: session });
     history.replaceState(null, "", location.pathname);
     roomBar.show(session.code, "host");

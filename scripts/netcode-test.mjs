@@ -3,13 +3,17 @@
 //  2. a host world and a guest game (the real guest-game.js with prediction
 //     and reconciliation) talk through a fake link with latency, jitter and
 //     packet loss. Checks that the guest's predicted hero matches the host's
-//     authoritative one, and how often corrections happen.
+//     authoritative one, and how often corrections happen. Mid-match the host
+//     breaks walls and moves to the next level; the guest must follow with an
+//     identical map.
 
 import { createWorld, addPlayer, findPlayer, step } from "../src/sim/world.js";
 import { encodeInputs, decodeInputs, encodeSnapshot, decodeSnapshot, roundAim } from "../src/net/protocol.js";
 import { createInputQueue } from "../src/net/input-queue.js";
 import { createGuestGame } from "../src/game/guest-game.js";
 import { createRng, rngFloat, rngInt } from "../src/core/rng.js";
+import { loadLevel, blast } from "../src/sim/level/level.js";
+import { hashTiles } from "../src/sim/level/generate.js";
 
 let failed = 0;
 function check(name, ok) {
@@ -79,6 +83,7 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
   const queue = createInputQueue(1);
   const up = fakeLink({ latency, jitter, loss, seed: 1 });
   const down = fakeLink({ latency, jitter, loss, seed: 2 });
+  const reliable = fakeLink({ latency: latency + 2, jitter: 0, loss: 0, seed: 3 }); // TCP-like: late, never lost
 
   // Scripted guest input; it stops moving and shooting for the last second.
   const rng = createRng(7);
@@ -88,8 +93,10 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
   const session = {
     slot: 1,
     seed,
+    welcome: { slot: 1, seed, depth: host.depth, mapHash: host.level.mapHash, tileChanges: [] },
     connected: true,
     onSnapshot: (fn) => (handlers.snapshot = fn),
+    onMessage: (fn) => (handlers.message = fn),
     onWelcome: () => {},
     sendInputs: (frames) => up.send(now, encodeInputs(frames)),
     status: () => ({ state: "connected" }),
@@ -109,6 +116,8 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
   const guest = createGuestGame({ session, input, view });
 
   let pendingEvents = [];
+  let sentDepth = host.depth;
+  let sentTiles = 0;
   let hostGuestShots = 0;
   let guestShots = 0;
   let maxBytes = 0;
@@ -118,6 +127,19 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
 
     for (const buf of up.receive(now)) queue.push(decodeInputs(buf));
     step(host, { 0: { moveX: 0, moveY: 0, aim: 0, fire: false, alt: false, swap: false }, 1: queue.take() });
+    // Scripted level events: walls broken near the start, then the next level, then more walls.
+    if (now === 300 || now === 1200) blast(host, host.spawns[0].x, host.spawns[0].y - 48, 40);
+    if (now === 700) loadLevel(host, host.depth + 1);
+    if (host.depth !== sentDepth) {
+      sentDepth = host.depth;
+      sentTiles = 0;
+      reliable.send(now, { t: "level", depth: host.depth, mapHash: host.level.mapHash });
+    }
+    if (host.tileChanges.length > sentTiles) {
+      reliable.send(now, { t: "tiles", depth: host.depth, changes: host.tileChanges.slice(sentTiles) });
+      sentTiles = host.tileChanges.length;
+    }
+    for (const msg of reliable.receive(now)) handlers.message(msg);
     for (const ev of host.events) {
       pendingEvents.push({ tick: host.tick, ev });
       if (ev.type === "shot" && ev.owner === 1) hostGuestShots++;
@@ -134,7 +156,18 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
   const g = findPlayer(guest.world, 1);
   const h = findPlayer(host, 1);
   const info = guest.debugInfo().lines.join(" | ");
-  return { dist: Math.hypot(g.x - h.x, g.y - h.y), info, hostGuestShots, guestShots, maxBytes, starved: queue.starved, dropped: queue.dropped };
+  return {
+    dist: Math.hypot(g.x - h.x, g.y - h.y),
+    info,
+    hostGuestShots,
+    guestShots,
+    maxBytes,
+    starved: queue.starved,
+    dropped: queue.dropped,
+    sameLevel: guest.world.depth === host.depth && host.depth === 2,
+    sameMap: hashTiles(guest.world.map) === hashTiles(host.map) && host.tileChanges.length > 0,
+    mapCheck: guest.mapCheck,
+  };
 }
 
 for (const cfg of [
@@ -146,6 +179,7 @@ for (const cfg of [
   const r = runMatch(cfg);
   console.log(`      ${cfg.name}: ${r.info.split(" | ")[2]} shots host/guest ${r.hostGuestShots}/${r.guestShots} starved ${r.starved} skipped ${r.dropped} max snap ${r.maxBytes} B`);
   check(`${cfg.name}: guest hero ends where the host has it (${r.dist.toFixed(4)} px)`, r.dist < 0.01);
+  check(`${cfg.name}: guest followed to level 2, same map incl. broken walls, hash check ${r.mapCheck}`, r.sameLevel && r.sameMap && r.mapCheck === "OK");
   if (cfg.loss === 0 && cfg.jitter === 0) {
     check(`${cfg.name}: every predicted shot also happened on the host`, r.hostGuestShots === r.guestShots);
     check(`${cfg.name}: no starvation`, r.starved <= cfg.latency + 1);

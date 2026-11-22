@@ -29,7 +29,7 @@ export async function joinRoom(code, { nextSeq }) {
   const peer = await openPeer(null, peerOptions(ice));
   const token = sessionToken();
 
-  const handlers = { snapshot: () => {}, status: () => {}, welcome: () => {} };
+  const handlers = { snapshot: () => {}, status: () => {}, welcome: () => {}, message: () => {} };
   let transport = null;
   let state = "connecting"; // connected | lost | host-left
   let lostAt = 0;
@@ -64,6 +64,7 @@ export async function joinRoom(code, { nextSeq }) {
         if (msg?.t === "welcome") finish(null, { t, msg });
         else if (msg?.t === "reject") finish(Object.assign(new Error(msg.reason), { type: msg.reason }));
         else if (msg?.t === "bye") hostLeft();
+        else if (msg) handlers.message(msg);
       });
       t.onClose(() => finish(Object.assign(new Error("closed"), { type: "connect-timeout" })));
     });
@@ -138,6 +139,10 @@ export async function joinRoom(code, { nextSeq }) {
     get seed() {
       return welcome.seed;
     },
+    /** Latest welcome message: seed, depth, mapHash, tileChanges. */
+    get welcome() {
+      return welcome;
+    },
     get connected() {
       return state === "connected";
     },
@@ -151,6 +156,10 @@ export async function joinRoom(code, { nextSeq }) {
     /** Called after a reconnect; the host may have restarted with another seed. */
     onWelcome(fn) {
       handlers.welcome = fn;
+    },
+    /** Other reliable messages from the host ("level", "tiles"). */
+    onMessage(fn) {
+      handlers.message = fn;
     },
     sendInputs(frames) {
       if (state === "connected") transport.sendFast(encodeInputs(frames));

@@ -2,20 +2,15 @@
 // Everything here (camera, particles, gun kick) is cosmetic and local.
 
 import { VIEW_W, VIEW_H, TILE, PLAYER } from "../sim/constants.js";
-import { T_WALL, tileAt } from "../sim/level/tilemap.js";
 import { WEAPONS } from "../data/weapons.js";
+import { BIOMES, levelLabel } from "../data/biomes.js";
+import { PORTAL_CHARGE_TICKS, playersInPortal } from "../sim/level/level.js";
 import { buildFoxSprites, FOX_PALETTE_P2 } from "./sprites/fox.js";
 import { buildWeaponSprites } from "./sprites/weapons.js";
+import { buildPropSprites } from "./sprites/props.js";
+import { renderMap } from "./map-renderer.js";
 
 const COLORS = {
-  void: "#0b0a12",
-  wallTop: "#3b2f4a",
-  wallEdge: "#5a4870",
-  wallFace: "#261e31",
-  floor: "#1d1826",
-  floorDot: "#251f31",
-  floorCrack: "#17131f",
-  wallShadow: "#141019",
   bullet: "#fff3b0",
   bulletTrail: "#ffb43d",
   spark: ["#ffd27a", "#fff3b0", "#ff9a3d"],
@@ -35,18 +30,12 @@ export function drawPos(e, alpha) {
   return { x: lerp(e.px, e.x, alpha), y: lerp(e.py, e.y, alpha) };
 }
 
-/** Cheap deterministic hash for tile decoration. */
-function tileHash(tx, ty, seed) {
-  let h = Math.imul(tx, 374761393) ^ Math.imul(ty, 668265263) ^ seed;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return (h ^ (h >>> 16)) >>> 0;
-}
-
 export function createView(renderer) {
   const ctx = renderer.ctx;
   // Per player slot. Real hero choice comes in stage 9.
   const heroSprites = [buildFoxSprites(), buildFoxSprites(FOX_PALETTE_P2)];
   const guns = buildWeaponSprites();
+  const props = buildPropSprites();
 
   const camera = { x: 0, y: 0, ready: false };
   let cam = { x: 0, y: 0 }; // rounded camera used for this frame
@@ -54,63 +43,14 @@ export function createView(renderer) {
 
   let mapCanvas = null;
   let mapFor = null;
+  let mapRev = -1;
+  let shownDepth = -1;
+  let fade = 0; // black overlay after a level change, 1 -> 0
 
   const fx = []; // particles and flashes
   const gunKick = {}; // slot -> pixels
 
   // ---- map ---------------------------------------------------------------
-
-  function buildMapCanvas(world) {
-    const map = world.map;
-    const c = document.createElement("canvas");
-    c.width = map.w * TILE;
-    c.height = map.h * TILE;
-    const g = c.getContext("2d");
-    const wall = (tx, ty) => tileAt(map, tx, ty) === T_WALL;
-
-    for (let ty = 0; ty < map.h; ty++) {
-      for (let tx = 0; tx < map.w; tx++) {
-        const x = tx * TILE;
-        const y = ty * TILE;
-        const h = tileHash(tx, ty, world.seed);
-        if (wall(tx, ty)) {
-          g.fillStyle = COLORS.wallTop;
-          g.fillRect(x, y, TILE, TILE);
-          if (!wall(tx, ty - 1)) {
-            g.fillStyle = COLORS.wallEdge;
-            g.fillRect(x, y, TILE, 1);
-          }
-          if (!wall(tx, ty + 1)) {
-            // Visible front face of the wall.
-            g.fillStyle = COLORS.wallFace;
-            g.fillRect(x, y + TILE - 6, TILE, 6);
-            g.fillStyle = COLORS.wallTop;
-            g.fillRect(x + (h % 12) + 1, y + TILE - 4, 2, 1);
-          }
-        } else {
-          g.fillStyle = COLORS.floor;
-          g.fillRect(x, y, TILE, TILE);
-          for (let i = 0; i < 3; i++) {
-            const v = h >>> (i * 8);
-            g.fillStyle = COLORS.floorDot;
-            g.fillRect(x + (v % 15), y + ((v >>> 4) % 15), 1, 1);
-          }
-          if (h % 7 === 0) {
-            g.fillStyle = COLORS.floorCrack;
-            const cx = x + 3 + (h % 9);
-            const cy = y + 4 + ((h >>> 5) % 8);
-            g.fillRect(cx, cy, 3, 1);
-            g.fillRect(cx + 2, cy + 1, 2, 1);
-          }
-          if (wall(tx, ty - 1)) {
-            g.fillStyle = COLORS.wallShadow;
-            g.fillRect(x, y, TILE, 2);
-          }
-        }
-      }
-    }
-    return c;
-  }
 
   // ---- camera ------------------------------------------------------------
 
@@ -219,6 +159,12 @@ export function createView(renderer) {
         }
       } else if (ev.type === "bulletFade") {
         fx.push({ kind: "puff", x: ev.x, y: ev.y, life: 6, max: 6 });
+      } else if (ev.type === "wallBroken") {
+        for (let i = 0; i < 8; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const s = 0.5 + Math.random() * 1.5;
+          fx.push({ kind: "spark", x: ev.x, y: ev.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 10 + ((Math.random() * 10) | 0), color: "#8a7fa0" });
+        }
       }
     }
   }
@@ -264,7 +210,86 @@ export function createView(renderer) {
     renderer.rect(x, y + 2, 1, 3, c);
   }
 
-  function drawHud(focus) {
+  // ---- level props -------------------------------------------------------
+
+  function drawChests(world) {
+    for (const c of world.level.chests) {
+      if (c.opened) continue;
+      ctx.drawImage(props.chest, Math.round(c.x - 6 - cam.x), Math.round(c.y - 4 - cam.y));
+    }
+  }
+
+  function drawPortal(world) {
+    const P = world.level.portal;
+    const colors = BIOMES[world.level.biome].palette.portal;
+    const x = P.x - cam.x;
+    const y = P.y - cam.y;
+    if (x < -24 || y < -24 || x > VIEW_W + 24 || y > VIEW_H + 24) return;
+    const t = world.tick;
+    const charge = Math.min(1, P.charge / PORTAL_CHARGE_TICKS);
+    const r = 11 + Math.sin(t * 0.1) * 1;
+
+    // dark glowing mouth
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = colors[2];
+    ctx.beginPath();
+    ctx.ellipse(Math.round(x), Math.round(y), r - 1, (r - 1) * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // swirl: dots on two counter-rotating rings
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2 + t * 0.06;
+      renderer.pixel(x + Math.cos(a) * r, y + Math.sin(a) * r * 0.6, colors[i % 2 ? 0 : 2]);
+      const b = -(i / 16) * Math.PI * 2 - t * 0.09;
+      renderer.pixel(x + Math.cos(b) * r * 0.55, y + Math.sin(b) * r * 0.35, colors[0]);
+    }
+    renderer.rect(x - 1, y - 1, 3, 2, colors[1]);
+    // charge: a brighter arc filling up around the ring
+    const n = Math.round(charge * 24);
+    for (let i = 0; i < n; i++) {
+      const a = (i / 24) * Math.PI * 2 - Math.PI / 2;
+      renderer.pixel(x + Math.cos(a) * (r + 3), y + Math.sin(a) * (r + 3) * 0.6, colors[1]);
+    }
+  }
+
+  /** Small arrow at the screen edge pointing to the portal when it is off-screen. */
+  function drawPortalArrow(world, focus) {
+    if (!focus) return;
+    const P = world.level.portal;
+    const sx = P.x - cam.x;
+    const sy = P.y - cam.y;
+    const margin = 8;
+    if (sx >= margin && sy >= margin && sx <= VIEW_W - margin && sy <= VIEW_H - margin) return;
+    const cx = VIEW_W / 2;
+    const cy = VIEW_H / 2;
+    const a = Math.atan2(sy - cy, sx - cx);
+    const k = Math.min((VIEW_W / 2 - margin) / Math.abs(Math.cos(a) || 1e-6), (VIEW_H / 2 - margin) / Math.abs(Math.sin(a) || 1e-6));
+    const ax = cx + Math.cos(a) * k;
+    const ay = cy + Math.sin(a) * k;
+    const color = BIOMES[world.level.biome].palette.portal[0];
+    // Filled triangle: tip at (ax, ay), widening backwards.
+    const ux = Math.cos(a);
+    const uy = Math.sin(a);
+    for (let d = 0; d <= 6; d++) {
+      const half = d * 0.6;
+      for (let w = -half; w <= half; w += 0.5) {
+        renderer.pixel(ax - ux * d - uy * w, ay - uy * d + ux * w, color);
+      }
+    }
+  }
+
+  function drawHud(world, focus) {
+    const lvl = `${levelLabel(world.depth)} ${BIOMES[world.level.biome].label}`;
+    renderer.text(lvl, VIEW_W - renderer.measureText(lvl).w - 3, 3, "#b8aecb");
+
+    const players = world.entities.filter((e) => e.type === "player").length;
+    const inPortal = playersInPortal(world);
+    if (inPortal > 0 && inPortal < players) {
+      const msg = "WAITING FOR PARTNER";
+      renderer.text(msg, Math.round(VIEW_W / 2 - renderer.measureText(msg).w / 2), VIEW_H - 24, "#e6d4ff");
+    }
+
     if (!focus) return;
     const name = WEAPONS[focus.weapons[focus.wi]].name;
     const label = `${name}  Q`;
@@ -291,14 +316,23 @@ export function createView(renderer) {
     },
 
     render(world, alpha, mouse, focus) {
-      if (mapFor !== world.map) {
-        mapCanvas = buildMapCanvas(world);
+      if (world.depth !== shownDepth) {
+        shownDepth = world.depth;
+        camera.ready = false;
+        fx.length = 0;
+        fade = 1;
+      }
+      if (mapFor !== world.map || mapRev !== world.map.rev) {
+        mapCanvas = renderMap(world);
         mapFor = world.map;
+        mapRev = world.map.rev;
       }
       updateCamera(world, focus, alpha, mouse);
 
-      renderer.clear(COLORS.void);
+      renderer.clear(BIOMES[world.level.biome].palette.void);
       ctx.drawImage(mapCanvas, -cam.x, -cam.y);
+      drawPortal(world);
+      drawChests(world);
 
       // Draw lower entities last so they overlap the ones behind them.
       const players = world.entities.filter((e) => e.type === "player").sort((a, b) => a.y - b.y);
@@ -306,7 +340,14 @@ export function createView(renderer) {
       for (const e of world.entities) if (e.type === "bullet") drawBullet(e, alpha);
       drawEffects();
 
-      drawHud(focus);
+      drawPortalArrow(world, focus);
+      drawHud(world, focus);
+      if (fade > 0) {
+        ctx.globalAlpha = fade;
+        renderer.rect(0, 0, VIEW_W, VIEW_H, "#000");
+        ctx.globalAlpha = 1;
+        fade = Math.max(0, fade - 0.05);
+      }
       if (mouse) drawCrosshair(mouse.x, mouse.y);
     },
   };

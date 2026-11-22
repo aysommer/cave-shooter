@@ -3,32 +3,36 @@
 // Rules for everything under src/sim/:
 //  - no DOM, canvas, audio, network, Math.random() or Date.now();
 //  - the world is plain JSON-serializable data (structuredClone-able);
-//  - the only way to advance it is step(world, inputs).
+//  - the world advances through step(world, inputs); level progression
+//    (updateLevel) runs only on the authoritative side (host / solo).
 // This lets the same code run on the host, on the client (prediction) and in
 // Node (tests, a dedicated server later).
 
 import { createRng } from "../core/rng.js";
 import { emptyInput } from "./input-frame.js";
-import { parseTilemap } from "./level/tilemap.js";
-import { TEST_ROOM } from "./level/test-room.js";
 import { createPlayer, stepPlayer } from "./entities/player.js";
 import { stepBullet } from "./entities/bullet.js";
 import { addEntity } from "./entity.js";
+import { loadLevel } from "./level/level.js";
 
-export function createWorld(seed) {
-  const { map, spawns } = parseTilemap(TEST_ROOM);
-  return {
+export function createWorld(seed, depth = 1) {
+  const world = {
     seed: seed >>> 0,
     tick: 0,
     rng: createRng(seed),
     nextId: 1,
-    map,
-    spawns,
+    depth: 0,
+    map: null,
+    level: null, // portal, chests, enemy spawn points, map hash (see level.js)
+    spawns: [],
+    tileChanges: [], // [tx, ty, tile] since the level started (walls broken etc.)
     entities: [],
     // Things that happened during the last step (shots, hits, ...). The view
-    // turns them into effects and sounds; the network will replicate them.
+    // turns them into effects and sounds; the network replicates them.
     events: [],
   };
+  loadLevel(world, depth);
+  return world;
 }
 
 /** Adds a player for slot 0 or 1 at its spawn point and returns it. */
