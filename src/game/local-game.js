@@ -68,7 +68,7 @@ export function createLocalGame({ seed, input, view, host = null }) {
     /** Debug: jump to the next level (works for the host too, the guest follows). */
     skipLevel() {
       loadLevel(world, world.depth + 1);
-      view.onTick(world.events);
+      view.onTick(world.events, world);
       world.events = [];
     },
 
@@ -84,7 +84,7 @@ export function createLocalGame({ seed, input, view, host = null }) {
       }
       step(world, inputs);
       updateLevel(world);
-      view.onTick(world.events);
+      view.onTick(world.events, world);
       syncLevel();
 
       if (host) {

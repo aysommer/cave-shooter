@@ -2,6 +2,7 @@
 // the network only the id is sent.
 //
 // Units: ticks (1/60 s), pixels per tick, radians.
+// shake (0..1), kick (px), casing (color, null = none) and sound are cosmetic.
 
 export const WEAPONS = {
   pistol: {
@@ -16,6 +17,10 @@ export const WEAPONS = {
     damage: 3,
     recoil: 0.5, // pushes the shooter back
     sprite: "pistol",
+    shake: 0.12,
+    kick: 1.5,
+    casing: "#e8c25a",
+    sound: "pistol",
   },
   smg: {
     name: "SMG",
@@ -29,6 +34,10 @@ export const WEAPONS = {
     damage: 2,
     recoil: 0.3,
     sprite: "smg",
+    shake: 0.07,
+    kick: 1,
+    casing: "#e8c25a",
+    sound: "smg",
   },
   shotgun: {
     name: "SHOTGUN",
@@ -42,5 +51,9 @@ export const WEAPONS = {
     damage: 2,
     recoil: 2.2,
     sprite: "shotgun",
+    shake: 0.35,
+    kick: 4,
+    casing: "#d9483b",
+    sound: "shotgun",
   },
 };

@@ -96,6 +96,12 @@ const ART = {
 
 const WHITE = "#ffffff";
 
+function darken(hex, k) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v) => Math.round(v * k).toString(16).padStart(2, "0");
+  return `#${c(n >> 16)}${c((n >> 8) & 255)}${c(n & 255)}`;
+}
+
 /** Same rows with every opaque pixel turned white (hit flash). */
 function whitePalette(rows) {
   const pal = {};
@@ -115,6 +121,11 @@ export function buildEnemySprites() {
     out[kind] = {
       frames: [make(a.rows, pal), make(frameB, pal)],
       flash: make(a.rows, whitePalette(a.rows)),
+      // On its back and darkened, left on the floor.
+      corpse: buildSprite(
+        [...a.rows].reverse(),
+        Object.fromEntries(Object.entries(pal).map(([k, v]) => [k, darken(v, 0.55)])),
+      ),
       w: a.rows[0].length,
       h: a.rows.length,
     };

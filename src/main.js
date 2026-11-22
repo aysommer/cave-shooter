@@ -13,11 +13,15 @@ import { joinRoom } from "./net/client.js";
 import { createLocalGame } from "./game/local-game.js";
 import { createGuestGame } from "./game/guest-game.js";
 import { createLobby, createRoomBar } from "./ui/lobby.js";
+import { createAudio } from "./audio/audio.js";
+import { loadSettings, saveSettings } from "./view/settings.js";
 
 const canvas = document.getElementById("game");
 const renderer = createRenderer(canvas, VIEW_W, VIEW_H);
 const input = createInput(canvas, VIEW_W, VIEW_H);
-const view = createView(renderer);
+const settings = loadSettings();
+const audio = createAudio(settings);
+const view = createView(renderer, { audio, settings });
 const debug = createDebug(renderer);
 const lobby = createLobby(document.getElementById("lobby"));
 const roomBar = createRoomBar(document.getElementById("roombar"));
@@ -41,6 +45,17 @@ function run(newGame, { network }) {
       if (input.consumePressed("F2")) cycleLinkSim();
       if (input.consumePressed("KeyR")) game.restart();
       if (input.consumePressed("KeyN")) game.skipLevel?.();
+      if (input.consumePressed("KeyM")) {
+        settings.muted = !settings.muted;
+        audio.applySettings();
+        saveSettings(settings);
+        view.toast(settings.muted ? "SOUND OFF" : "SOUND ON");
+      }
+      if (input.consumePressed("F3")) {
+        settings.shake = !settings.shake;
+        saveSettings(settings);
+        view.toast(settings.shake ? "SCREEN SHAKE ON" : "SCREEN SHAKE OFF");
+      }
       game.update();
       debug.onTick(game.world);
       input.endFrame();
@@ -108,5 +123,7 @@ if (import.meta.env.DEV) {
     get session() {
       return session;
     },
+    audio,
+    view,
   };
 }

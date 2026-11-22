@@ -1,5 +1,6 @@
 // Draws the world. Reads the simulation state, never modifies it.
-// Everything here (camera, particles, gun kick) is cosmetic and local.
+// Everything here (camera, particles, decals, shake, sound) is cosmetic and
+// local; see event-fx.js for how simulation events turn into effects.
 
 import { VIEW_W, VIEW_H, TILE, PLAYER } from "../sim/constants.js";
 import { WEAPONS } from "../data/weapons.js";
@@ -12,6 +13,10 @@ import { buildFoxSprites, FOX_PALETTE_P2 } from "./sprites/fox.js";
 import { buildWeaponSprites } from "./sprites/weapons.js";
 import { buildPropSprites } from "./sprites/props.js";
 import { renderMap } from "./map-renderer.js";
+import { createParticles } from "./particles.js";
+import { createDecals } from "./decals.js";
+import { createFeedback } from "./feedback.js";
+import { createEventFx } from "./event-fx.js";
 
 const COLORS = {
   bullet: "#fff3b0",
@@ -20,9 +25,6 @@ const COLORS = {
   crosshair: "#ffffff",
   tag: ["#f2a65a", "#8fb3e0"],
 };
-
-/** Particle color when an enemy is hit. */
-const BLOOD = { biter: "#c2455b", spitter: "#8fbf4a", tank: "#8a7a68", bomber: "#d96b2b", nest: "#e6d4a0" };
 
 const CAMERA = {
   lookAhead: 0.25, // how far the camera leans toward the cursor
@@ -36,7 +38,11 @@ export function drawPos(e, alpha) {
   return { x: lerp(e.px, e.x, alpha), y: lerp(e.py, e.y, alpha) };
 }
 
-export function createView(renderer) {
+/**
+ * @param {ReturnType<import("../core/renderer.js").createRenderer>} renderer
+ * @param {{ audio?: object, settings: {shake: boolean} }} opts
+ */
+export function createView(renderer, { audio = null, settings }) {
   const ctx = renderer.ctx;
   // Per player slot. Real hero choice comes in stage 9.
   const heroSprites = [buildFoxSprites(), buildFoxSprites(FOX_PALETTE_P2)];
@@ -45,7 +51,8 @@ export function createView(renderer) {
   const enemySprites = buildEnemySprites();
 
   const camera = { x: 0, y: 0, ready: false };
-  let cam = { x: 0, y: 0 }; // rounded camera used for this frame
+  let camBase = { x: 0, y: 0 }; // rounded camera, without shake (aiming uses this)
+  let cam = { x: 0, y: 0 }; // what the world is drawn with: camBase + shake
   let lastFrame = performance.now();
 
   let mapCanvas = null;
@@ -54,10 +61,21 @@ export function createView(renderer) {
   let shownDepth = "";
   let fade = 0; // black overlay after a level change, 1 -> 0
 
-  const fx = []; // particles and flashes
   const gunKick = {}; // slot -> pixels
+  const particles = createParticles(renderer);
+  const decals = createDecals();
+  const feedback = createFeedback(settings);
+  const eventFx = createEventFx({ particles, decals, feedback, audio, gunKick, enemySprites });
 
-  // ---- map ---------------------------------------------------------------
+  // The last drawn scene, shown again while a hitstop freezes the picture.
+  const frozenScene = document.createElement("canvas");
+  frozenScene.width = VIEW_W;
+  frozenScene.height = VIEW_H;
+  const frozenCtx = frozenScene.getContext("2d");
+  let haveScene = false;
+
+  const lastDust = {}; // slot -> time of the last running dust puff
+  let toast = { text: "", until: 0 };
 
   // ---- camera ------------------------------------------------------------
 
@@ -90,7 +108,9 @@ export function createView(renderer) {
       camera.x += (tx - camera.x) * k;
       camera.y += (ty - camera.y) * k;
     }
-    cam = { x: Math.round(camera.x), y: Math.round(camera.y) };
+    camBase = { x: Math.round(camera.x), y: Math.round(camera.y) };
+    const o = feedback.offset();
+    cam = { x: camBase.x + o.x, y: camBase.y + o.y };
   }
 
   // ---- entities ----------------------------------------------------------
@@ -185,100 +205,6 @@ export function createView(renderer) {
     const y = pos.y + b.h / 2 - cam.y;
     renderer.line(x - b.vx * 0.8, y - b.vy * 0.8, x, y, COLORS.bulletTrail);
     renderer.rect(x - 1, y - 1, 2, 2, COLORS.bullet);
-  }
-
-  // ---- effects -----------------------------------------------------------
-
-  function onEvents(events) {
-    for (const ev of events) {
-      if (ev.type === "shot") {
-        fx.push({ kind: "flash", x: ev.x, y: ev.y, life: 3, max: 3 });
-        gunKick[ev.owner] = WEAPONS[ev.weapon].recoil > 1 ? 3 : 2;
-      } else if (ev.type === "bulletWall") {
-        for (let i = 0; i < 4; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const s = 0.4 + Math.random() * 1.2;
-          fx.push({
-            kind: "spark",
-            x: ev.x,
-            y: ev.y,
-            vx: Math.cos(a) * s,
-            vy: Math.sin(a) * s,
-            life: 6 + ((Math.random() * 6) | 0),
-            color: COLORS.spark[i % COLORS.spark.length],
-          });
-        }
-      } else if (ev.type === "bulletFade") {
-        fx.push({ kind: "puff", x: ev.x, y: ev.y, life: 6, max: 6 });
-      } else if (ev.type === "wallBroken") {
-        burst(ev.x, ev.y, 8, ["#8a7fa0", "#5a4870"], 1.5, 18);
-      } else if (ev.type === "enemyHurt") {
-        burst(ev.x, ev.y, 3, [BLOOD[ev.kind] ?? "#c2455b"], 1.2, 10);
-      } else if (ev.type === "enemyDie") {
-        burst(ev.x, ev.y, 12, [BLOOD[ev.kind] ?? "#c2455b", "#ffffff"], 1.8, 18);
-        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 8, max: 8, r: 10, color: "#ffffff" });
-      } else if (ev.type === "playerHurt") {
-        burst(ev.x, ev.y, 6, ["#ff5e5e", "#ffd0d0"], 1.6, 12);
-      } else if (ev.type === "playerDie") {
-        burst(ev.x, ev.y, 18, ["#ff5e5e", "#ffffff", "#e8772e"], 2.2, 24);
-      } else if (ev.type === "explosion") {
-        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 14, max: 14, r: 30, color: "#ffb347" });
-        fx.push({ kind: "flash", x: ev.x, y: ev.y, life: 4, max: 4 });
-        burst(ev.x, ev.y, 24, ["#ffb347", "#ff7a2e", "#fff1d6", "#5a4870"], 2.6, 22);
-      } else if (ev.type === "enemyShot") {
-        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 5, max: 5, r: 6, color: "#ff5e7a" });
-      } else if (ev.type === "enemyHatch") {
-        burst(ev.x, ev.y, 6, ["#e6d4a0", "#6b4a3a"], 1, 12);
-      } else if (ev.type === "portalOpen") {
-        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 24, max: 24, r: 40, color: "#e6d4ff" });
-      }
-    }
-  }
-
-  function burst(x, y, n, colors, speed, life) {
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const s = (0.3 + Math.random()) * speed;
-      fx.push({ kind: "spark", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: Math.round(life * (0.5 + Math.random() * 0.5)), color: colors[i % colors.length] });
-    }
-  }
-
-  function tickEffects() {
-    for (const f of fx) {
-      f.life--;
-      if (f.kind === "spark") {
-        f.x += f.vx;
-        f.y += f.vy;
-        f.vx *= 0.85;
-        f.vy *= 0.85;
-      }
-    }
-    for (let i = fx.length - 1; i >= 0; i--) if (fx[i].life <= 0) fx.splice(i, 1);
-    for (const slot in gunKick) gunKick[slot] = Math.max(0, gunKick[slot] - 0.5);
-  }
-
-  function drawEffects() {
-    for (const f of fx) {
-      const x = f.x - cam.x;
-      const y = f.y - cam.y;
-      if (f.kind === "flash") {
-        const r = f.life >= 2 ? 3 : 2;
-        renderer.rect(x - r, y - 1, r * 2 + 1, 3, "#ffcf5a");
-        renderer.rect(x - 1, y - r, 3, r * 2 + 1, "#ffcf5a");
-        renderer.rect(x - 1, y - 1, 3, 3, "#ffffff");
-      } else if (f.kind === "spark") {
-        renderer.pixel(x, y, f.color);
-      } else if (f.kind === "puff") {
-        renderer.pixel(x, y, f.life > 3 ? "#8a8296" : "#4d4659");
-      } else if (f.kind === "ring") {
-        const r = f.r * (1 - f.life / f.max) + 2;
-        const n = Math.max(8, Math.round(r * 2));
-        for (let i = 0; i < n; i++) {
-          const a = (i / n) * Math.PI * 2;
-          renderer.pixel(x + Math.cos(a) * r, y + Math.sin(a) * r, f.color);
-        }
-      }
-    }
   }
 
   function drawCrosshair(mx, my) {
@@ -429,22 +355,74 @@ export function createView(renderer) {
     renderer.text(label, VIEW_W - m.w - 3, VIEW_H - 8, "#e8e0f0");
   }
 
+  /** Puffs of dust behind running heroes. */
+  function runDust(world) {
+    const now = performance.now();
+    for (const p of world.entities) {
+      if (p.type !== "player" || p.dead || Math.hypot(p.vx, p.vy) < 1) continue;
+      if (now - (lastDust[p.slot] ?? 0) < 140) continue;
+      lastDust[p.slot] = now;
+      particles.add({ kind: "dust", x: p.x + p.w / 2 - p.vx * 3, y: p.y + p.h, life: 18 });
+    }
+  }
+
+  function drawScene(world, alpha) {
+    renderer.clear(BIOMES[world.level.biome].palette.void);
+    ctx.drawImage(mapCanvas, -cam.x, -cam.y);
+    decals.draw(ctx, cam);
+    drawPortal(world);
+    drawChests(world);
+
+    // Draw lower entities last so they overlap the ones behind them.
+    const showTags = world.entities.filter((e) => e.type === "player").length > 1;
+    const actors = world.entities.filter((e) => e.type === "player" || e.type === "enemy");
+    actors.sort((a, b) => a.y + a.h - (b.y + b.h) || (a.dead ? -1 : 0));
+    for (const e of actors) {
+      if (e.type === "player") drawPlayer(world, e, alpha, showTags);
+      else drawEnemy(world, e, alpha);
+    }
+    for (const e of world.entities) if (e.type === "bullet") drawBullet(e, alpha);
+    particles.draw(cam);
+  }
+
+  function drawOverlays() {
+    const hf = eventFx.hurtFlash;
+    if (hf > 0) {
+      ctx.globalAlpha = hf * 0.25;
+      renderer.rect(0, 0, VIEW_W, VIEW_H, "#ff2a2a");
+      ctx.globalAlpha = hf * 0.8;
+      renderer.strokeRect(0, 0, VIEW_W, VIEW_H, "#ff2a2a");
+      renderer.strokeRect(1, 1, VIEW_W - 2, VIEW_H - 2, "#ff2a2a");
+      ctx.globalAlpha = 1;
+    }
+    if (performance.now() < toast.until) centerText(toast.text, VIEW_H - 36, "#ffffff");
+  }
+
   return {
-    /** World point → screen point (uses this frame's camera). */
+    /** World point → screen point (camera without shake, for aiming). */
     toScreen(x, y) {
-      return { x: x - cam.x, y: y - cam.y };
+      return { x: x - camBase.x, y: y - camBase.y };
     },
 
     /** Called after every simulation tick with the events of that tick. */
-    onTick(events) {
-      onEvents(events);
-      tickEffects();
+    onTick(events, world) {
+      if (world) decals.ensure(world);
+      eventFx.handle(events);
+      particles.tick(decals);
+      eventFx.fadeHurt();
+      for (const slot in gunKick) gunKick[slot] = Math.max(0, gunKick[slot] - 0.5);
     },
 
     /** Forget per-world state (new world / level). */
     reset() {
       camera.ready = false;
-      fx.length = 0;
+      particles.clear();
+      feedback.reset();
+    },
+
+    /** Short message at the bottom of the screen (settings changes etc.). */
+    toast(text) {
+      toast = { text, until: performance.now() + 1500 };
     },
 
     render(world, alpha, mouse, focus) {
@@ -452,34 +430,33 @@ export function createView(renderer) {
       if (levelId !== shownDepth) {
         shownDepth = levelId;
         camera.ready = false;
-        fx.length = 0;
+        particles.clear();
+        feedback.reset();
+        haveScene = false;
         fade = 1;
       }
+      decals.ensure(world);
       if (mapFor !== world.map || mapRev !== world.map.rev) {
         mapCanvas = renderMap(world);
         mapFor = world.map;
         mapRev = world.map.rev;
       }
       updateCamera(world, focus, alpha, mouse);
+      eventFx.setListener(focus?.slot ?? 0, camBase.x + VIEW_W / 2, camBase.y + VIEW_H / 2);
 
-      renderer.clear(BIOMES[world.level.biome].palette.void);
-      ctx.drawImage(mapCanvas, -cam.x, -cam.y);
-      drawPortal(world);
-      drawChests(world);
-
-      // Draw lower entities last so they overlap the ones behind them.
-      const showTags = world.entities.filter((e) => e.type === "player").length > 1;
-      const actors = world.entities.filter((e) => e.type === "player" || e.type === "enemy");
-      actors.sort((a, b) => a.y + a.h - (b.y + b.h) || (a.dead ? -1 : 0));
-      for (const e of actors) {
-        if (e.type === "player") drawPlayer(world, e, alpha, showTags);
-        else drawEnemy(world, e, alpha);
+      if (feedback.frozen && haveScene) {
+        // Hitstop: show the frame from the moment of impact.
+        ctx.drawImage(frozenScene, 0, 0);
+      } else {
+        runDust(world);
+        drawScene(world, alpha);
+        frozenCtx.drawImage(renderer.ctx.canvas, 0, 0);
+        haveScene = true;
       }
-      for (const e of world.entities) if (e.type === "bullet") drawBullet(e, alpha);
-      drawEffects();
 
       drawPortalArrow(world, focus);
       drawHud(world, focus);
+      drawOverlays();
       if (fade > 0) {
         ctx.globalAlpha = fade;
         renderer.rect(0, 0, VIEW_W, VIEW_H, "#000");

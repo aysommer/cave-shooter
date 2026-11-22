@@ -11,7 +11,7 @@ const UP = ["KeyW", "ArrowUp"];
 const DOWN = ["KeyS", "ArrowDown"];
 
 // Keys whose default browser action we suppress (scrolling, help, etc.).
-const BLOCK_DEFAULT = new Set(["F1", "Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+const BLOCK_DEFAULT = new Set(["F1", "F2", "F3", "Space", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
 
 export function createInput(canvas, viewW, viewH) {
   const down = new Set();

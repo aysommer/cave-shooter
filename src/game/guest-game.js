@@ -45,6 +45,9 @@ function lerpAngle(a, b, t) {
 /** Orders levels: a new run, or a deeper level in the same run, is "later". */
 const levelKey = (run, depth) => run * 100000 + depth;
 
+/** Events the guest already produced itself for its own hero (prediction). */
+const PREDICTED_EVENTS = new Set(["shot", "bulletWall", "bulletFade", "swap"]);
+
 /** Player fields that the host is authoritative for. */
 const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "weapons", "hp", "maxHp", "invuln", "dead"];
 
@@ -145,7 +148,8 @@ export function createGuestGame({ session, input, view }) {
     if (clockOffset === null || Math.abs(sample - clockOffset) > 30) clockOffset = sample;
     else clockOffset += (sample - clockOffset) * 0.05;
 
-    for (const e of snap.events) if (e.ev.owner !== slot) remoteEvents.push(e);
+    // Own hits and kills still come from the host (it decides them).
+    for (const e of snap.events) if (!(e.ev.owner === slot && PREDICTED_EVENTS.has(e.ev.type))) remoteEvents.push(e);
     reconcile(snap);
   });
 
@@ -332,7 +336,7 @@ export function createGuestGame({ session, input, view }) {
         }
         return true;
       });
-      view.onTick([...local.events, ...due]);
+      view.onTick([...local.events, ...due], local);
     },
 
     render(alpha, mouse) {
