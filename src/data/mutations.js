@@ -41,4 +41,4 @@ export function xpToNext(lv) {
 /** Ticks to pick a mutation before one is chosen automatically. */
 export const CHOOSE_TICKS = 30 * 60;
 /** XP crystal value per enemy type. */
-export const ENEMY_XP = { biter: 2, spitter: 3, tank: 8, bomber: 3, nest: 10 };
+export const ENEMY_XP = { biter: 2, spitter: 3, tank: 8, bomber: 3, nest: 10, queen: 40, golem: 50, titan: 60 };

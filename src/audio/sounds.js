@@ -64,6 +64,23 @@ export const SOUNDS = {
     { wave: "square", freq: 784, dur: 0.15, duty: 0.3, volume: 0.25, delay: 0.3 },
     { wave: "square", freq: 1047, dur: 0.4, duty: 0.3, volume: 0.25, delay: 0.45 },
   ],
+  dash: [{ wave: "noise", freq: 1500, freqEnd: 4000, dur: 0.12, volume: 0.3, lowpass: 0.6 }],
+  tongue: [
+    { wave: "triangle", freq: 300, freqEnd: 900, dur: 0.08, volume: 0.3 },
+    { wave: "triangle", freq: 900, freqEnd: 250, dur: 0.1, volume: 0.25, delay: 0.08 },
+  ],
+  honk: [
+    { wave: "saw", freq: 330, freqEnd: 300, dur: 0.22, volume: 0.35, vibrato: 0.8 },
+    { wave: "square", freq: 165, freqEnd: 150, dur: 0.22, duty: 0.3, volume: 0.2 },
+  ],
+  fetch: [
+    { wave: "saw", freq: 600, freqEnd: 380, dur: 0.08, volume: 0.35 },
+    { wave: "saw", freq: 620, freqEnd: 400, dur: 0.08, volume: 0.35, delay: 0.14 },
+  ],
+  bossPhase: [
+    { wave: "saw", freq: 120, freqEnd: 60, dur: 0.6, volume: 0.45 },
+    { wave: "noise", freq: 300, freqEnd: 80, dur: 0.5, volume: 0.3, lowpass: 0.4 },
+  ],
   swap: [{ wave: "square", freq: 900, freqEnd: 1300, dur: 0.05, duty: 0.25, volume: 0.2 }],
   bulletWall: [{ wave: "noise", freq: 5000, freqEnd: 1500, dur: 0.035, volume: 0.12 }],
   enemyShot: [

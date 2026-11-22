@@ -194,6 +194,44 @@ export function createEventFx({ particles, decals, feedback, audio, gunKick, ene
       case "victory":
         audio?.play("victory", { volume: 1 });
         break;
+      case "ability":
+        switch (ev.ability) {
+          case "dash":
+            particles.burst(ev.x, ev.y, 8, ["#ffa65c", "#e8772e", "#ffffff"], 1.2, 12);
+            for (let i = 1; i <= 4; i++) particles.add({ kind: "dust", x: ev.x - Math.cos(ev.angle) * i * 4, y: ev.y + 4 - Math.sin(ev.angle) * i * 4, life: 14 });
+            sound("dash", ev);
+            break;
+          case "tongue":
+            particles.add({ kind: "tongue", x: ev.x, y: ev.y - 2, angle: ev.angle, len: ev.len, life: 12, max: 12 });
+            sound("tongue", ev);
+            break;
+          case "honk":
+            particles.add({ kind: "cone", x: ev.x, y: ev.y, angle: ev.angle, arc: 1.7, radius: 58, life: 14, max: 14 });
+            sound("honk", ev, { volume: 1 });
+            if (mine) feedback.shake(0.15);
+            break;
+          case "fetch":
+            particles.add({ kind: "ring", x: ev.x, y: ev.y, life: 20, max: 20, r: 130, color: "#d8a868" });
+            sound("fetch", ev, { volume: 1 });
+            break;
+        }
+        break;
+      case "poison":
+        particles.burst(ev.x, ev.y, 3, ["#8fbf4a", "#c8f07a"], 0.6, 14);
+        break;
+      case "bossPhase":
+        particles.add({ kind: "ring", x: ev.x, y: ev.y, life: 20, max: 20, r: 50, color: "#ff3a5a" });
+        audio?.play("bossPhase", { volume: 1 });
+        feedback.shake(0.4);
+        break;
+      case "bossDie":
+        for (let i = 0; i < 3; i++) particles.add({ kind: "ring", x: ev.x, y: ev.y, life: 18 + i * 8, max: 18 + i * 8, r: 40 + i * 25, color: i ? "#ffb347" : "#ffffff" });
+        particles.burst(ev.x, ev.y, 40, ["#ffb347", "#ff3a5a", "#ffffff", "#f2c14e"], 3, 40);
+        decals.scorch(ev.x, ev.y, 22);
+        audio?.play("explosion", { volume: 1, pitch: 0.7 });
+        feedback.shake(1);
+        feedback.hitstop(120);
+        break;
       case "levelStart":
         audio?.play("levelStart", { volume: 0.8 });
         break;

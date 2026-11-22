@@ -4,6 +4,7 @@ import { generateLevel, hashTiles } from "../src/sim/level/generate.js";
 import { T_FLOOR, tileAt } from "../src/sim/level/tilemap.js";
 import { TILE } from "../src/sim/constants.js";
 import { createWorld, addPlayer } from "../src/sim/world.js";
+import { isBossDepth } from "../src/data/biomes.js";
 import { blast, setTile } from "../src/sim/level/level.js";
 
 let failed = 0;
@@ -33,11 +34,23 @@ const cell = (p) => ({ tx: Math.floor(p.x / TILE), ty: Math.floor(p.y / TILE) })
 const onFloor = (map, p) => tileAt(map, cell(p).tx, cell(p).ty) === T_FLOOR;
 
 let levels = 0;
+let arenas = 0;
+const arenaProblems = [];
 let maxW = 0, maxH = 0, minFloor = 1e9, maxFloor = 0, minExit = 1e9;
 const hashes = new Set();
 for (let seed = 1; seed <= 60; seed++) {
   for (let depth = 1; depth <= 12; depth++) {
     const L = generateLevel(seed * 7919, depth);
+    if (isBossDepth(depth)) {
+      // Boss arenas: open room, everything on the floor, boss far from the heroes.
+      arenas++;
+      const reachA = reachable(L.map, cell(L.spawns[0]));
+      for (const p of [...L.spawns, L.portal, L.boss]) {
+        if (!onFloor(L.map, p) || !reachA.has(cell(p).ty * L.map.w + cell(p).tx)) arenaProblems.push(`seed ${seed} depth ${depth}: ${JSON.stringify(p)} not reachable floor`);
+      }
+      if (Math.hypot(L.boss.x - L.spawns[0].x, L.boss.y - L.spawns[0].y) < 8 * TILE) arenaProblems.push(`seed ${seed} depth ${depth}: boss too close`);
+      continue;
+    }
     levels++;
     hashes.add(L.mapHash);
     const { map } = L;
@@ -61,6 +74,8 @@ for (let seed = 1; seed <= 60; seed++) {
 for (const p of problems.slice(0, 10)) console.log("      " + p);
 check(`${levels} levels: connected, everything placed on floor, rock border, deterministic`, problems.length === 0);
 check(`levels differ (${hashes.size} unique maps of ${levels})`, hashes.size === levels);
+for (const p of arenaProblems.slice(0, 5)) console.log("      " + p);
+check(`${arenas} boss arenas: heroes, portal and boss on reachable floor, boss at a distance`, arenas > 0 && arenaProblems.length === 0);
 check(`map size up to ${maxW}x${maxH} tiles`, maxW <= 80 && maxH <= 80);
 console.log(`      floor tiles ${minFloor}..${maxFloor}, shortest walk to exit ${minExit} tiles`);
 check("exit is far from the start (>= 15 tiles of walking)", minExit >= 15);

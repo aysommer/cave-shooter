@@ -10,7 +10,8 @@
 import { createRng, rngFloat, rngInt, rngChance } from "../../core/rng.js";
 import { TILE } from "../constants.js";
 import { T_FLOOR, T_WALL } from "./tilemap.js";
-import { BIOMES, biomeForDepth } from "../../data/biomes.js";
+import { BIOMES, biomeForDepth, isBossDepth } from "../../data/biomes.js";
+import { BIOME_BOSS } from "../../data/enemies.js";
 
 const GRID = 80;
 const MARGIN = 3; // walkers never dig closer than this to the grid edge
@@ -46,6 +47,7 @@ export function generateLevel(seed, depth, run = 0) {
   const biome = biomeForDepth(depth);
   const b = BIOMES[biome];
   const rng = createRng(levelSeed((seed ^ Math.imul(run, 0x27d4eb2f)) >>> 0, depth));
+  if (isBossDepth(depth)) return generateArena(rng, depth, biome);
 
   // ---- dig -----------------------------------------------------------------
   const grid = new Uint8Array(GRID * GRID).fill(T_WALL);
@@ -184,5 +186,42 @@ export function generateLevel(seed, depth, run = 0) {
     enemySpawns,
     mapHash: hashTiles(map),
     stats: { floor: cells.length, maxDist: dist[exitCell] },
+  };
+}
+
+/**
+ * Boss arena: an open room with a few symmetric pillars to hide behind.
+ * Heroes start at the bottom, the boss waits at the top, the exit portal
+ * (closed until the boss dies) is in the middle of the top wall.
+ */
+function generateArena(rng, depth, biome) {
+  const W = 28;
+  const H = 20;
+  const tiles = new Array(W * H).fill(T_WALL);
+  for (let y = 2; y < H - 2; y++) for (let x = 2; x < W - 2; x++) tiles[y * W + x] = T_FLOOR;
+  // Rounded corners
+  for (const [x, y] of [[2, 2], [W - 3, 2], [2, H - 3], [W - 3, H - 3]]) tiles[y * W + x] = T_WALL;
+  // Pillars, mirrored left/right
+  const pillars = rngInt(rng, 2, 3);
+  for (let i = 0; i < pillars; i++) {
+    const px = rngInt(rng, 5, 10);
+    const py = rngInt(rng, 6, 12);
+    for (const x of [px, W - 1 - px - 1]) {
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) tiles[(py + dy) * W + x + dx] = T_WALL;
+    }
+  }
+  const map = { w: W, h: H, tiles, rev: 0 };
+  const c = (tx, ty) => ({ x: tx * TILE + TILE / 2, y: ty * TILE + TILE / 2 });
+  return {
+    depth,
+    biome,
+    map,
+    spawns: [c(W / 2 - 1, H - 4), c(W / 2, H - 4)],
+    portal: c(W / 2, 3),
+    chests: [],
+    enemySpawns: [],
+    boss: { kind: BIOME_BOSS[biome], ...c(W / 2, 6) },
+    mapHash: hashTiles(map),
+    stats: { floor: tiles.filter((t) => t === T_FLOOR).length, maxDist: 0 },
   };
 }

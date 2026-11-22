@@ -11,8 +11,10 @@ import { spawnChest } from "../entities/pickup.js";
 import { startAmmo } from "../entities/player.js";
 import { CHESTS } from "../../data/loot.js";
 import { mut } from "../../data/mutations.js";
+import { HEROES } from "../../data/heroes.js";
 import { FINAL_DEPTH, VICTORY_TICKS, startChoosing, updateChoosing, regenerate } from "../progression.js";
 import { spawnEnemy } from "../entities/enemy.js";
+import { spawnBoss } from "../entities/boss.js";
 import { rngFloat } from "../../core/rng.js";
 
 /** All players must stand in the portal this long to leave the level. */
@@ -51,7 +53,10 @@ export function loadLevel(world, depth) {
       p.hp = Math.ceil(p.maxHp / 2);
     }
   }
-  spawnEnemies(world, lvl);
+  if (lvl.boss) {
+    const heroes = world.entities.filter((e) => e.type === "player").length;
+    spawnBoss(world, lvl.boss.kind, lvl.boss.x, lvl.boss.y, heroes);
+  } else spawnEnemies(world, lvl);
   for (const c of lvl.chests) spawnChest(world, rngFloat(world.rng) < CHESTS.ammoChestChance ? "ammo" : "weapon", c.x, c.y);
   if (!world.entities.some((e) => e.type === "enemy")) world.level.portal.open = true;
   world.events.push({ type: "levelStart", owner: 255, depth });
@@ -98,7 +103,9 @@ export function restartRun(world) {
   for (const p of world.entities) {
     if (p.type !== "player") continue;
     p.dead = false;
-    p.hp = p.maxHp = PLAYER_HP;
+    p.hp = p.maxHp = HEROES[p.hero]?.hp ?? PLAYER_HP;
+    p.abilityCd = 0;
+    p.dashTicks = 0;
     p.invuln = 0;
     p.weapons = [...START_WEAPONS];
     p.wi = 0;
@@ -226,12 +233,13 @@ function updateRevives(world, players) {
     const gy = ghost.y + ghost.h / 2;
     const helper = players.find((p) => !p.dead && Math.hypot(p.x + p.w / 2 - gx, p.y + p.h / 2 - gy) < REVIVE.radius);
     // Second Wind: the helper revives twice as fast, and the ghost stands up stronger.
-    const fast = helper && mut(helper, "secondWind") ? 2 : 1;
+    // The dog revives twice as fast too (stacks with Second Wind).
+    const fast = helper ? (mut(helper, "secondWind") ? 2 : 1) * (helper.hero === "dog" ? 2 : 1) : 1;
     ghost.revive = helper ? ghost.revive + fast : Math.max(0, ghost.revive - 2);
     if (ghost.revive >= REVIVE.ticks) {
       ghost.dead = false;
       ghost.revive = 0;
-      ghost.hp = Math.min(ghost.maxHp, REVIVE.hp + (fast > 1 ? 2 : 0));
+      ghost.hp = Math.min(ghost.maxHp, REVIVE.hp + (helper && mut(helper, "secondWind") ? 2 : 0));
       ghost.invuln = REVIVE.invuln;
       world.events.push({ type: "playerRevive", owner: ghost.slot, x: gx, y: gy });
     }

@@ -99,6 +99,13 @@ export function rollWeapon(world, bonusTier = 0) {
   return rngPick(world.rng, pool);
 }
 
+/** A beaten boss leaves two better weapons and a medkit. */
+export function rollBossLoot(world, x, y) {
+  spawnPickup(world, "weapon", x - 10, y, { weapon: rollWeapon(world, 1), fresh: true });
+  spawnPickup(world, "weapon", x + 10, y, { weapon: rollWeapon(world, 1), fresh: true });
+  spawnPickup(world, "health", x, y + 10);
+}
+
 /** Experience crystals (always) and maybe ammo or health where an enemy died. */
 export function rollDrop(world, x, y, killer, kind) {
   const xp = ENEMY_XP[kind] ?? 2;
@@ -109,7 +116,8 @@ export function rollDrop(world, x, y, killer, kind) {
   const r = rngFloat(world.rng);
   const k = alivePlayers(world).find((p) => p.slot === killer);
   const healthChance = k && k.hp <= k.maxHp / 3 ? DROPS.lowHealthChance : DROPS.healthChance;
-  const ammoChance = DROPS.ammoChance * (1 + 0.5 * (k ? mut(k, "scavenger") : 0));
+  // Scavenger mutation and the fox's passive: more ammo from your kills.
+  const ammoChance = DROPS.ammoChance * (1 + 0.5 * (k ? mut(k, "scavenger") : 0)) * (k?.hero === "fox" ? 1.25 : 1);
   if (r < healthChance) spawnPickup(world, "health", x, y);
   else if (r < healthChance + ammoChance) spawnPickup(world, "ammo", x, y, { ammo: wantedAmmo(world) });
 }
@@ -145,10 +153,16 @@ export function stepPickup(world, e) {
     return;
   }
   if (e.kind === "weapon") return; // taken with the "use" key
-  // Crystals (and with Magnet everything) fly to the nearest hero in range.
+  // Fetched by the dog: flies to it, whatever the distance.
   let pull = null;
   let pullD = Infinity;
-  for (const p of alivePlayers(world)) {
+  if (e.fetch !== undefined) {
+    pull = alivePlayers(world).find((p) => p.slot === e.fetch) ?? null;
+    if (pull) pullD = Math.hypot(centerX(pull) - centerX(e), centerY(pull) - centerY(e));
+    else delete e.fetch;
+  }
+  // Crystals (and with Magnet everything) fly to the nearest hero in range.
+  for (const p of pull ? [] : alivePlayers(world)) {
     const r = MAGNET_RADIUS * (e.kind === "xp" ? 1.6 : 0.6) * (mut(p, "magnet") ? 2.5 : 1);
     const d = Math.hypot(centerX(p) - centerX(e), centerY(p) - centerY(e));
     if (d < r && d < pullD) {
@@ -157,7 +171,7 @@ export function stepPickup(world, e) {
     }
   }
   if (pull && pullD > 1) {
-    const s = e.kind === "xp" ? 2.6 : 1.8;
+    const s = e.fetch !== undefined ? 4 : e.kind === "xp" ? 2.6 : 1.8;
     e.x += ((centerX(pull) - centerX(e)) / pullD) * Math.min(s, pullD);
     e.y += ((centerY(pull) - centerY(e)) / pullD) * Math.min(s, pullD);
   }

@@ -66,6 +66,14 @@ function pickTarget(world, e, def) {
 export function stepEnemy(world, e) {
   const def = ENEMIES[e.kind];
   if (e.hurt > 0) e.hurt--;
+  // Stunned (tongue, honk): just slide with the knockback.
+  if (e.stun > 0) {
+    e.stun--;
+    e.vx *= 0.85;
+    e.vy *= 0.85;
+    if (def.speed > 0) moveAndCollide(world.map, e);
+    return;
+  }
   if (e.cooldown > 0) e.cooldown--;
 
   const t = pickTarget(world, e, def);

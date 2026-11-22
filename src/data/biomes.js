@@ -2,6 +2,8 @@
 // (used by the renderer). Three levels per biome, then the next one.
 
 export const LEVELS_PER_BIOME = 3;
+/** Each biome: 3 normal levels, then a boss arena ("1-B"). */
+export const DEPTHS_PER_BIOME = LEVELS_PER_BIOME + 1;
 
 export const BIOMES = [
   {
@@ -90,12 +92,16 @@ export const BIOMES = [
 ];
 
 export function biomeForDepth(depth) {
-  return Math.floor((depth - 1) / LEVELS_PER_BIOME) % BIOMES.length;
+  return Math.floor((depth - 1) / DEPTHS_PER_BIOME) % BIOMES.length;
 }
 
-/** "1-1", "1-2", ... "2-1": area and level inside it. */
+export function isBossDepth(depth) {
+  return depth % DEPTHS_PER_BIOME === 0;
+}
+
+/** "1-1", "1-2", "1-3", "1-B", "2-1", ...: area and level inside it. */
 export function levelLabel(depth) {
-  const area = Math.floor((depth - 1) / LEVELS_PER_BIOME) + 1;
-  const sub = ((depth - 1) % LEVELS_PER_BIOME) + 1;
-  return `${area}-${sub}`;
+  const area = Math.floor((depth - 1) / DEPTHS_PER_BIOME) + 1;
+  const sub = ((depth - 1) % DEPTHS_PER_BIOME) + 1;
+  return `${area}-${sub === DEPTHS_PER_BIOME ? "B" : sub}`;
 }

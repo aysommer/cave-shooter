@@ -10,13 +10,16 @@ import { breakWall } from "../level/level.js";
 import { TILE } from "../constants.js";
 import { mut } from "../../data/mutations.js";
 import { teamDamage } from "../progression.js";
+import { HEROES } from "../../data/heroes.js";
+import { useAbility, dashVelocity, heroPassives } from "../abilities.js";
 
 export function startAmmo() {
   return AMMO_TYPES.map((t) => AMMO[t].start);
 }
 
-export function createPlayer(world, slot, cx, cy) {
+export function createPlayer(world, slot, cx, cy, hero) {
   return {
+    hero,
     type: "player",
     slot,
     x: cx - PLAYER.w / 2,
@@ -24,8 +27,12 @@ export function createPlayer(world, slot, cx, cy) {
     w: PLAYER.w,
     h: PLAYER.h,
     aim: 0,
-    hp: PLAYER_HP,
-    maxHp: PLAYER_HP,
+    hp: HEROES[hero]?.hp ?? PLAYER_HP,
+    maxHp: HEROES[hero]?.hp ?? PLAYER_HP,
+    abilityCd: 0, // ticks until the ability (right mouse button) is ready
+    dashTicks: 0,
+    dashAngle: 0,
+    prevAlt: false,
     invuln: 0,
     dead: false,
     revive: 0, // revive progress while a ghost, 0..REVIVE.ticks
@@ -53,15 +60,19 @@ export function createPlayer(world, slot, cx, cy) {
 export function stepPlayer(world, p, input) {
   if (p.invuln > 0) p.invuln--;
   // Movement (a ghost drifts slower and cannot do anything else)
-  const speed = p.dead ? PLAYER.ghostSpeed : PLAYER.maxSpeed * (1 + 0.12 * mut(p, "quickFeet"));
+  const speed = p.dead ? PLAYER.ghostSpeed : PLAYER.maxSpeed * (HEROES[p.hero]?.speed ?? 1) * (1 + 0.12 * mut(p, "quickFeet"));
   let dx = input.moveX;
   let dy = input.moveY;
   if (dx !== 0 && dy !== 0) {
     dx *= Math.SQRT1_2;
     dy *= Math.SQRT1_2;
   }
-  p.vx += (dx * speed - p.vx) * PLAYER.accel;
-  p.vy += (dy * speed - p.vy) * PLAYER.accel;
+  if (p.abilityCd > 0) p.abilityCd--;
+  if (p.dead) p.dashTicks = 0;
+  if (!dashVelocity(p)) {
+    p.vx += (dx * speed - p.vx) * PLAYER.accel;
+    p.vy += (dy * speed - p.vy) * PLAYER.accel;
+  }
   if (Math.abs(p.vx) < 0.01) p.vx = 0;
   if (Math.abs(p.vy) < 0.01) p.vy = 0;
   moveAndCollide(world.map, p);
@@ -72,9 +83,15 @@ export function stepPlayer(world, p, input) {
     p.prevFire = input.fire;
     p.prevSwap = input.swap;
     p.prevUse = use;
+    p.prevAlt = !!input.alt;
     p.burstLeft = 0;
     return;
   }
+
+  // Hero ability (right mouse button) and ticking passives
+  if (input.alt && !p.prevAlt) useAbility(world, p, input);
+  p.prevAlt = !!input.alt;
+  heroPassives(world, p);
 
   // Take a weapon from the floor
   if (use && !p.prevUse) takeWeapon(world, p);
@@ -138,6 +155,8 @@ function modded(world, p, w) {
   }
   if (w.explosion && mut(p, "bigBoom")) out.explosion = { ...w.explosion, radius: w.explosion.radius * 1.35, wallRadius: w.explosion.wallRadius * 1.2 };
   if (w.melee && mut(p, "longArms")) out.melee = { ...w.melee, radius: w.melee.radius * 1.4 };
+  // General Ga: a nasty peck.
+  if (w.melee && p.hero === "goose") out.damage *= 1.5;
   return out;
 }
 

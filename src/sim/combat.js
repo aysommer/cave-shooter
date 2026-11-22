@@ -2,7 +2,9 @@
 
 import { ENEMIES, PLAYER_INVULN } from "../data/enemies.js";
 import { blast } from "./level/level.js";
-import { rollDrop } from "./entities/pickup.js";
+import { rollDrop, rollBossLoot } from "./entities/pickup.js";
+
+const ENEMY_OWNER_ID = 255;
 import { mut } from "../data/mutations.js";
 import { rngFloat } from "../core/rng.js";
 
@@ -15,7 +17,8 @@ export function overlaps(a, b) {
 
 /** Hits a player. Knockback direction (kx, ky) is a unit vector. Returns true if it landed. */
 export function damagePlayer(world, p, amount, kx = 0, ky = 0) {
-  if (p.dead || p.invuln > 0) return false;
+  // Dashing (the fox) is untouchable.
+  if (p.dead || p.invuln > 0 || p.dashTicks > 0) return false;
   const dodge = mut(p, "dodgy");
   if (dodge && !world.predictOnly && rngFloat(world.rng) < 0.15 * dodge) {
     p.invuln = 20;
@@ -74,6 +77,10 @@ export function killEnemy(world, e, from = -1) {
     explode(world, centerX(e), centerY(e), { radius: 20, damage: 4, wallRadius: 0 }, from);
   }
   rollDrop(world, centerX(e), centerY(e), from, e.kind);
+  if (def.boss) {
+    rollBossLoot(world, centerX(e), centerY(e));
+    world.events.push({ type: "bossDie", owner: from, kind: e.kind, x: centerX(e), y: centerY(e) });
+  }
 }
 
 /**
@@ -84,6 +91,8 @@ export function explode(world, x, y, { radius, damage, wallRadius }, from = -1) 
   world.events.push({ type: "explosion", owner: 255, x, y });
   for (const e of world.entities) {
     if (e.dead || (e.type !== "player" && e.type !== "enemy")) continue;
+    // Bosses' explosions do not hurt their own side.
+    if (from === ENEMY_OWNER_ID && e.type === "enemy") continue;
     const dx = centerX(e) - x;
     const dy = centerY(e) - y;
     const d = Math.hypot(dx, dy);

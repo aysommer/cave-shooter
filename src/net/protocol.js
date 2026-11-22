@@ -13,8 +13,9 @@ import { PROJECTILE_KINDS, PROJECTILE_SIZE } from "../sim/entities/bullet.js";
 import { ENEMY_KINDS } from "../data/enemies.js";
 import { VIEW_W, VIEW_H } from "../sim/constants.js";
 import { MUTATION_IDS } from "../data/mutations.js";
+import { HERO_IDS } from "../data/heroes.js";
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 export const MSG_INPUT = 1;
 export const MSG_SNAPSHOT = 2;
@@ -56,7 +57,12 @@ const EVENT_TYPES = [
   "chooseStart",
   "dodge",
   "victory",
+  "ability",
+  "poison",
+  "bossPhase",
+  "bossDie",
 ];
+const ABILITIES = ["dash", "tongue", "honk", "fetch"];
 const PHASES = ["play", "choose", "victory"];
 /** Events whose aux byte is a weapon id. */
 const WEAPON_EVENTS = new Set(["shot", "swap", "swing", "pickupWeapon"]);
@@ -216,6 +222,10 @@ export function encodeSnapshot(world, ack, events, focus = null) {
   w.u8(world.pendingPicks);
   w.u8(PHASES.indexOf(world.phase));
   w.u16(world.phase === "choose" ? Math.max(0, world.choose.timer) : world.victory);
+  // The boss bar is shown even when the boss is out of the interest area.
+  const boss = world.entities.find((e) => e.boss && !e.dead);
+  w.u8(boss ? kindIndex(boss.kind) : 255);
+  w.u8(boss ? Math.round((Math.max(0, boss.hp) / boss.maxHp) * 255) : 0);
 
   w.u8(players.length);
   for (const p of players) {
@@ -228,7 +238,11 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     w.u16(quantizeAim(p.aim));
     w.u8(p.wi);
     w.u8(Math.min(255, p.cooldown));
-    w.u8((p.prevFire ? 1 : 0) | (p.prevSwap ? 2 : 0) | (p.dead ? 4 : 0) | (p.prevUse ? 8 : 0));
+    w.u8((p.prevFire ? 1 : 0) | (p.prevSwap ? 2 : 0) | (p.dead ? 4 : 0) | (p.prevUse ? 8 : 0) | (p.prevAlt ? 16 : 0));
+    w.u8(HERO_IDS.indexOf(p.hero));
+    w.u16(p.abilityCd);
+    w.u8(p.dashTicks);
+    w.u16(quantizeAim(p.dashAngle));
     for (let i = 0; i < AMMO_TYPES.length; i++) w.u8(Math.min(255, p.ammo[i]));
     w.u8(p.burstLeft);
     w.u8(Math.max(0, p.burstTimer));
@@ -301,6 +315,7 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     else if (ev.type === "pickupAmmo") aux = AMMO_TYPES.indexOf(ev.ammo);
     else if (ev.type === "bulletWall") aux = Math.max(0, PROJECTILE_KINDS.indexOf(ev.kind));
     else if (ev.type === "mutationPick") aux = MUTATION_IDS.indexOf(ev.mutation);
+    else if (ev.type === "ability") aux = ABILITIES.indexOf(ev.ability) | (Math.min(63, Math.round((ev.len ?? 0) / 4)) << 2);
     else aux = kindIndex(ev.kind);
     w.u8(aux);
   }
@@ -325,6 +340,9 @@ export function decodeSnapshot(buf) {
   const pendingPicks = r.u8();
   const phase = PHASES[r.u8()] ?? "play";
   const phaseTimer = r.u16();
+  const bossKind = r.u8();
+  const bossHp = r.u8() / 255;
+  const boss = bossKind === 255 ? null : { kind: ENEMY_KINDS[bossKind], hpFrac: bossHp };
 
   const players = [];
   for (let i = 0, n = r.u8(); i < n; i++) {
@@ -345,6 +363,11 @@ export function decodeSnapshot(buf) {
     p.prevSwap = !!(flags & 2);
     p.dead = !!(flags & 4);
     p.prevUse = !!(flags & 8);
+    p.prevAlt = !!(flags & 16);
+    p.hero = HERO_IDS[r.u8()] ?? "fox";
+    p.abilityCd = r.u16();
+    p.dashTicks = r.u8();
+    p.dashAngle = dequantizeAim(r.u16());
     p.ammo = AMMO_TYPES.map(() => r.u8());
     p.burstLeft = r.u8();
     p.burstTimer = r.u8();
@@ -444,9 +467,13 @@ export function decodeSnapshot(buf) {
     else if (type === "pickupAmmo") ev.ammo = AMMO_TYPES[aux];
     else if (type === "bulletWall") ev.kind = PROJECTILE_KINDS[aux];
     else if (type === "mutationPick") ev.mutation = MUTATION_IDS[aux];
+    else if (type === "ability") {
+      ev.ability = ABILITIES[aux & 3];
+      ev.len = (aux >> 2) * 4;
+    }
     else ev.kind = ENEMY_KINDS[aux];
     events.push({ tick: evTick, ev });
   }
 
-  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, xp, xpLevel, pendingPicks, phase, phaseTimer, players, items, enemies, bullets, events, bytes: buf.byteLength };
+  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, xp, xpLevel, pendingPicks, phase, phaseTimer, boss, players, items, enemies, bullets, events, bytes: buf.byteLength };
 }

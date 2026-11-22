@@ -17,6 +17,8 @@ import { loadLevel } from "./level/level.js";
 import { stepEnemy, separateEnemies, onEnemyRemoved } from "./entities/enemy.js";
 import { buildFlowField } from "./ai/nav.js";
 import { stepPickup, stepChest } from "./entities/pickup.js";
+import { stepBoss } from "./entities/boss.js";
+import { DEFAULT_HERO_BY_SLOT } from "../data/heroes.js";
 
 /** How often enemies' flow field toward the players is rebuilt (ticks). */
 const NAV_EVERY = 10;
@@ -59,9 +61,9 @@ export function createWorld(seed, depth = 1, run = 0, { friendlyFire = false } =
 }
 
 /** Adds a player for slot 0 or 1 at its spawn point and returns it. */
-export function addPlayer(world, slot) {
+export function addPlayer(world, slot, hero = DEFAULT_HERO_BY_SLOT[slot] ?? "fox") {
   const sp = world.spawns[slot % world.spawns.length];
-  return addEntity(world, createPlayer(world, slot, sp.x, sp.y));
+  return addEntity(world, createPlayer(world, slot, sp.x, sp.y, hero));
 }
 
 export function removePlayer(world, slot) {
@@ -99,7 +101,7 @@ export function step(world, inputs) {
     if (e.type === "player") stepPlayer(world, e, inputs[e.slot] ?? emptyInput());
     else if (e.dead) continue; // killed earlier this tick
     else if (e.type === "bullet") stepBullet(world, e);
-    else if (e.type === "enemy") stepEnemy(world, e);
+    else if (e.type === "enemy") (e.boss ? stepBoss : stepEnemy)(world, e);
     else if (e.type === "pickup") stepPickup(world, e);
     else if (e.type === "chest") stepChest(world, e);
   }

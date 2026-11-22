@@ -6,6 +6,8 @@ import { VIEW_W, VIEW_H, TILE, PLAYER, REVIVE } from "../sim/constants.js";
 import { WEAPONS, AMMO, AMMO_TYPES } from "../data/weapons.js";
 import { PICKUP_RANGE } from "../data/loot.js";
 import { xpToNext } from "../data/mutations.js";
+import { HEROES } from "../data/heroes.js";
+import { ENEMIES } from "../data/enemies.js";
 import { BIOMES, levelLabel } from "../data/biomes.js";
 import { PORTAL_CHARGE_TICKS, playersInPortal, enemiesAlive } from "../sim/level/level.js";
 import { ENEMY_OWNER } from "../sim/entities/bullet.js";
@@ -161,7 +163,7 @@ export function createView(renderer, { audio = null, settings }) {
   }
 
   function drawPlayer(world, p, alpha, showTag) {
-    const fox = heroSprites[SLOT_HERO[p.slot] ?? "fox"];
+    const fox = heroSprites[p.hero ?? SLOT_HERO[p.slot] ?? "fox"];
     const pos = drawPos(p, alpha);
     const cx = pos.x + p.w / 2 - cam.x;
     const feet = pos.y + p.h - cam.y;
@@ -224,6 +226,57 @@ export function createView(renderer, { audio = null, settings }) {
     ctx.drawImage(left ? set.left : set.right, Math.round(cx - spr.w / 2), Math.round(feet - spr.h + 1));
   }
 
+  /** Boss health bar across the top of the screen. */
+  function drawBossBar(world) {
+    let boss = world.boss; // from the snapshot on the guest
+    if (!boss) {
+      const e = world.entities.find((x) => x.boss && !x.dead);
+      if (e) boss = { kind: e.kind, hpFrac: Math.max(0, e.hp) / e.maxHp };
+    }
+    if (!boss) return;
+    const w = 160;
+    const x = Math.round(VIEW_W / 2 - w / 2);
+    const y = VIEW_H - 20; // bottom centre: the boss itself usually stands at the top
+    renderer.rect(x - 1, y - 1, w + 2, 6, "#1a1020");
+    renderer.rect(x, y, w, 4, "#3a1626");
+    renderer.rect(x, y, Math.round(w * boss.hpFrac), 4, "#ff3a5a");
+    renderer.rect(x, y, Math.round(w * boss.hpFrac), 1, "#ff9aac");
+    centerText(ENEMIES[boss.kind]?.label ?? "", y - 8, "#ff9aac");
+  }
+
+  /** Bottom left: hero ability and its cooldown. */
+  function drawAbilityHud(p) {
+    const h = HEROES[p.hero];
+    if (!h || p.dead) return;
+    const ready = p.abilityCd <= 0;
+    const text = `RMB ${h.abilityLabel}`;
+    const x = 3;
+    const y = VIEW_H - 16;
+    renderer.text(text, x, y, ready ? "#f2c14e" : "#6a5a80");
+    const m = renderer.measureText(text);
+    if (!ready) {
+      const k = 1 - p.abilityCd / h.cooldown;
+      renderer.rect(x, y + 6, m.w, 2, "#2c2338");
+      renderer.rect(x, y + 6, Math.round(m.w * k), 2, "#f2c14e");
+    }
+  }
+
+  /** The dog sniffs out the nearest unopened chest. */
+  function drawChestSniff(world, focus) {
+    if (focus?.hero !== "dog" || focus.dead) return;
+    let best = null;
+    let bestD = Infinity;
+    for (const e of world.entities) {
+      if (e.type !== "chest" || e.dead) continue;
+      const d = Math.hypot(e.x - focus.x, e.y - focus.y);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    if (best) edgeArrow(best.x + best.w / 2, best.y + best.h / 2, "#d8a868", "?");
+  }
+
   function drawEnemyBullet(b, alpha) {
     const pos = drawPos(b, alpha);
     const x = Math.round(pos.x - cam.x);
@@ -234,7 +287,7 @@ export function createView(renderer, { audio = null, settings }) {
   }
 
   function drawBullet(world, b, alpha) {
-    if (b.owner === ENEMY_OWNER) return drawEnemyBullet(b, alpha);
+    if (b.owner === ENEMY_OWNER && b.kind !== "grenade") return drawEnemyBullet(b, alpha);
     const pos = drawPos(b, alpha);
     const x = pos.x + b.w / 2 - cam.x;
     const y = pos.y + b.h / 2 - cam.y;
@@ -692,7 +745,10 @@ export function createView(renderer, { audio = null, settings }) {
       drawPings();
       drawPortalArrow(world, focus);
       drawPartnerArrows(world, focus);
+      drawChestSniff(world, focus);
       drawHud(world, focus);
+      drawBossBar(world);
+      if (focus) drawAbilityHud(focus);
       drawOverlays();
       if (fade > 0) {
         ctx.globalAlpha = fade;

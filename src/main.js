@@ -15,6 +15,7 @@ import { createGuestGame } from "./game/guest-game.js";
 import { createLobby, createRoomBar } from "./ui/lobby.js";
 import { createChat } from "./ui/chat.js";
 import { createMutationScreen } from "./ui/mutations.js";
+import { createHeroSelect } from "./ui/hero-select.js";
 import { createAudio } from "./audio/audio.js";
 import { loadSettings, saveSettings } from "./view/settings.js";
 
@@ -28,6 +29,7 @@ const debug = createDebug(renderer);
 const lobby = createLobby(document.getElementById("lobby"));
 const roomBar = createRoomBar(document.getElementById("roombar"));
 const chat = createChat(document.getElementById("chat"));
+const heroSelect = createHeroSelect(document.getElementById("heroes"));
 const mutationScreen = createMutationScreen(document.getElementById("mutations"), { onPick: (n) => input.queueChoice(n) });
 
 const params = new URLSearchParams(location.search);
@@ -107,24 +109,72 @@ function run(newGame, { network }) {
   });
 }
 
-lobby.onSolo(() => run(createLocalGame({ seed, input, view }), { network: false }));
+/** Hero select from the lobby; null if the player went back. */
+async function pickHero(opts) {
+  lobby.hide();
+  const hero = await heroSelect.choose(opts);
+  if (!hero) {
+    lobby.show();
+    lobby.error("");
+  }
+  return hero;
+}
+
+lobby.onSolo(async () => {
+  const hero = await pickHero();
+  if (!hero) return;
+  heroSelect.hide();
+  run(createLocalGame({ seed, input, view, hero }), { network: false });
+});
 
 lobby.onHost(async ({ friendlyFire }) => {
-  lobby.busy("Создаём комнату…");
+  const hero = await pickHero();
+  if (!hero) return;
+  heroSelect.busy("Создаём комнату…");
   try {
     let localGame = null;
     session = await startHost({ getWelcome: () => localGame.welcomeInfo() });
-    localGame = createLocalGame({ seed, input, view, host: session, friendlyFire });
-    session.onMessage((msg) => showSocial(1, msg));
+    localGame = createLocalGame({ seed, input, view, host: session, friendlyFire, hero });
+    session.onMessage((msg) => {
+      if (msg?.t === "pickHero") {
+        // The guest asks for a hero: the host decides (no duplicates).
+        const res = localGame.pickHero(1, String(msg.hero));
+        session.send({ t: "heroResult", ok: res.ok, hero: res.hero ?? null });
+      } else showSocial(1, msg);
+    });
     chat.enable((text) => sendSocial({ t: "chat", text }));
     history.replaceState(null, "", location.pathname);
     roomBar.show(session.code, "host");
+    heroSelect.hide();
     run(localGame, { network: true });
   } catch (err) {
     console.error(err);
+    heroSelect.hide();
+    lobby.show();
     lobby.error(describeNetError(err));
   }
 });
+
+/** Guest: pick a hero the host's player does not have; the host confirms. */
+async function guestHero(sess) {
+  const mine = sess.welcome.heroes?.[sess.slot];
+  if (mine) return mine; // coming back after a drop: same hero
+  let message = "";
+  for (;;) {
+    const taken = Object.values(sess.welcome.heroes ?? {});
+    const hero = await pickHero({ taken, message });
+    if (!hero) return null;
+    heroSelect.busy("Спрашиваем хоста…");
+    const res = await new Promise((resolve) => {
+      sess.onMessage((msg) => {
+        if (msg?.t === "heroResult") resolve(msg);
+      });
+      sess.send({ t: "pickHero", hero });
+    });
+    if (res.ok) return res.hero;
+    message = "Этого героя уже взяли, выбери другого.";
+  }
+}
 
 async function join(code) {
   lobby.show();
@@ -132,6 +182,13 @@ async function join(code) {
   try {
     let guestGame = null;
     session = await joinRoom(code, { nextSeq: () => guestGame?.nextSeq() ?? 1 });
+    const hero = await guestHero(session);
+    if (!hero) {
+      session.close();
+      session = null;
+      return;
+    }
+    heroSelect.hide();
     guestGame = createGuestGame({ session, input, view, onSocial: (msg) => showSocial(0, msg) });
     localSlot = session.slot;
     chat.enable((text) => sendSocial({ t: "chat", text }));
@@ -141,6 +198,8 @@ async function join(code) {
   } catch (err) {
     console.error(err);
     session = null;
+    heroSelect.hide();
+    lobby.show();
     lobby.error(describeNetError(err));
   }
 }

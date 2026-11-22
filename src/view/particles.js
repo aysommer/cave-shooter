@@ -154,6 +154,29 @@ export function createParticles(renderer) {
             }
             break;
           }
+          case "tongue": {
+            const k = p.life / p.max;
+            const len = p.len * Math.min(1, (1 - k) * 3) * (k > 0.3 ? 1 : k / 0.3);
+            const x2 = x + Math.cos(p.angle) * len;
+            const y2 = y + Math.sin(p.angle) * len;
+            r.line(x, y + 1, x2, y2 + 1, "#a8325a");
+            r.line(x, y, x2, y2, "#ff8fa3");
+            r.rect(x2 - 1, y2 - 1, 3, 3, "#ff8fa3");
+            break;
+          }
+          case "cone": {
+            // Honk: arcs rolling outward.
+            const k = 1 - p.life / p.max;
+            for (let ring = 0; ring < 3; ring++) {
+              const rad = (k + ring * 0.2) * p.radius;
+              if (rad > p.radius || rad < 4) continue;
+              for (let i = 0; i <= 12; i++) {
+                const a = p.angle - p.arc / 2 + (p.arc * i) / 12;
+                r.pixel(x + Math.cos(a) * rad, y + Math.sin(a) * rad, ring === 0 ? "#ffffff" : "#f2c14e");
+              }
+            }
+            break;
+          }
           case "text": {
             const m = r.measureText(p.text);
             r.text(p.text, Math.round(x - m.w / 2), Math.round(y - (p.max - p.life) * 0.3), p.color);

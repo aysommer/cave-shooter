@@ -70,6 +70,16 @@ export const ENEMIES = {
   },
 };
 
+// ---- bosses: one at the end of each biome. Behaviour: src/sim/entities/boss.js ----
+Object.assign(ENEMIES, {
+  queen: { name: "Королева гнезда", label: "BROOD QUEEN", boss: true, hp: 240, w: 22, h: 15, speed: 0.35, sight: 999, score: 500, contactDamage: 2, knockback: 0 },
+  golem: { name: "Кристальный голем", label: "CRYSTAL GOLEM", boss: true, hp: 340, w: 18, h: 20, speed: 0.5, sight: 999, score: 700, contactDamage: 2, knockback: 0 },
+  titan: { name: "Магмовый титан", label: "MAGMA TITAN", boss: true, hp: 440, w: 22, h: 18, speed: 0.4, sight: 999, score: 1000, contactDamage: 3, knockback: 0 },
+});
+export const BIOME_BOSS = ["queen", "golem", "titan"];
+/** Boss health multiplier per extra player. */
+export const BOSS_HP_PER_PLAYER = 0.6;
+
 export const ENEMY_KINDS = Object.keys(ENEMIES);
 
 /** Which enemies appear in each biome, with weights. */

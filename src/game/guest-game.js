@@ -46,10 +46,10 @@ function lerpAngle(a, b, t) {
 const levelKey = (run, depth) => run * 100000 + depth;
 
 /** Events the guest already produced itself for its own hero (prediction). */
-const PREDICTED_EVENTS = new Set(["shot", "bulletWall", "bulletFade", "swap"]);
+const PREDICTED_EVENTS = new Set(["shot", "bulletWall", "bulletFade", "swap", "ability"]);
 
 /** Player fields that the host is authoritative for. */
-const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "prevUse", "hp", "maxHp", "invuln", "dead", "revive", "burstLeft", "burstTimer", "chosen"];
+const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "prevUse", "hp", "maxHp", "invuln", "dead", "revive", "burstLeft", "burstTimer", "chosen", "hero", "abilityCd", "dashTicks", "dashAngle", "prevAlt"];
 
 /**
  * @param {object} o
@@ -425,6 +425,7 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
         phase: latest?.phase ?? "play",
         choose: latest?.phase === "choose" ? { timer: latest.phaseTimer } : null,
         victory: latest?.phase === "victory" ? latest.phaseTimer : 0,
+        boss: latest?.boss ?? null,
         notice: noticeText(),
       };
       lastDisplay = display;

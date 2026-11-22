@@ -3,12 +3,13 @@
 import { PLAYER } from "../sim/constants.js";
 import { createWorld, addPlayer, removePlayer, findPlayer, step } from "../sim/world.js";
 import { updateLevel, loadLevel } from "../sim/level/level.js";
+import { HEROES } from "../data/heroes.js";
 
 export const LOCAL_SLOT = 0;
 /** Snapshot every N ticks (2 -> 30 Hz). */
 export const SNAPSHOT_EVERY = 2;
 
-export function createLocalGame({ seed, input, view, host = null, friendlyFire = false }) {
+export function createLocalGame({ seed, input, view, host = null, friendlyFire = false, hero = "fox" }) {
   let world = newWorld(seed);
   let lastInput = null;
   let pendingEvents = [];
@@ -18,14 +19,14 @@ export function createLocalGame({ seed, input, view, host = null, friendlyFire =
 
   function newWorld(s) {
     const w = createWorld(s, 1, 0, { friendlyFire });
-    addPlayer(w, LOCAL_SLOT);
+    addPlayer(w, LOCAL_SLOT, hero);
     return w;
   }
 
   if (host) {
-    host.onGuestJoin((slot) => {
-      if (!findPlayer(world, slot)) addPlayer(world, slot);
-    });
+    // A new guest gets a hero only after picking one (see pickHero); a
+    // returning guest keeps theirs.
+    host.onGuestJoin(() => {});
     host.onGuestLeave((slot) => removePlayer(world, slot));
   }
 
@@ -61,7 +62,18 @@ export function createLocalGame({ seed, input, view, host = null, friendlyFire =
         mapHash: world.level.mapHash,
         tileChanges: world.tileChanges,
         friendlyFire: world.friendlyFire,
+        // Heroes already in play, by slot (the guest's, if it is coming back).
+        heroes: Object.fromEntries(world.entities.filter((e) => e.type === "player").map((p) => [p.slot, p.hero])),
       };
+    },
+
+    /** The guest asks for a hero. First come, first served; no duplicates. */
+    pickHero(slot, heroId) {
+      if (findPlayer(world, slot)) return { ok: true, hero: findPlayer(world, slot).hero };
+      const taken = world.entities.some((e) => e.type === "player" && e.hero === heroId);
+      if (taken || !HEROES[heroId]) return { ok: false };
+      addPlayer(world, slot, heroId);
+      return { ok: true, hero: heroId };
     },
 
     /** Restart with a new seed (solo only: the guest could not follow). */

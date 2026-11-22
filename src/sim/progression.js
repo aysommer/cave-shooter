@@ -11,10 +11,10 @@
 
 import { MUTATIONS, MUTATION_IDS, mut, xpToNext, CHOOSE_TICKS } from "../data/mutations.js";
 import { rngFloat } from "../core/rng.js";
-import { BIOMES, LEVELS_PER_BIOME } from "../data/biomes.js";
+import { BIOMES, DEPTHS_PER_BIOME } from "../data/biomes.js";
 
-/** Last level of a run (stage 9 adds boss levels). */
-export const FINAL_DEPTH = LEVELS_PER_BIOME * BIOMES.length;
+/** Last level of a run: the third boss. */
+export const FINAL_DEPTH = DEPTHS_PER_BIOME * BIOMES.length;
 export const VICTORY_TICKS = 8 * 60;
 
 export function addXp(world, amount) {
