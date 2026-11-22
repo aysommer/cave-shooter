@@ -2,7 +2,8 @@
 //
 // The simulation never reads the keyboard or mouse directly; it only sees
 // these frames. This is what will be sent over the network in stage 2, so it
-// stays small and contains only plain data.
+// stays small and contains only plain data. Buttons are "held" states; the
+// simulation detects presses itself.
 
 /**
  * @typedef {Object} InputFrame
@@ -10,10 +11,11 @@
  * @property {-1|0|1} moveY
  * @property {number} aim    Aim angle in radians.
  * @property {boolean} fire  Primary fire held.
- * @property {boolean} alt   Secondary action held (ability).
+ * @property {boolean} alt   Secondary action held (hero ability).
+ * @property {boolean} swap  Swap weapon held.
  */
 
 /** @returns {InputFrame} */
 export function emptyInput() {
-  return { moveX: 0, moveY: 0, aim: 0, fire: false, alt: false };
+  return { moveX: 0, moveY: 0, aim: 0, fire: false, alt: false, swap: false };
 }

@@ -16,11 +16,17 @@ const BLOCK_DEFAULT = new Set(["F1", "Space", "ArrowLeft", "ArrowRight", "ArrowU
 export function createInput(canvas, viewW, viewH) {
   const down = new Set();
   const pressed = new Set(); // keys pressed since last consumePressed()
+  // Action buttons pressed since the last sample(). A tap shorter than one
+  // tick would otherwise never be seen as "held" by the simulation.
+  const latched = new Set();
   const mouse = { x: viewW / 2, y: viewH / 2, left: false, right: false };
 
   window.addEventListener("keydown", (e) => {
     if (BLOCK_DEFAULT.has(e.code)) e.preventDefault();
-    if (!e.repeat) pressed.add(e.code);
+    if (!e.repeat) {
+      pressed.add(e.code);
+      latched.add(e.code);
+    }
     down.add(e.code);
   });
   window.addEventListener("keyup", (e) => down.delete(e.code));
@@ -38,6 +44,7 @@ export function createInput(canvas, viewW, viewH) {
   canvas.addEventListener("mousedown", (e) => {
     if (e.button === 0) mouse.left = true;
     if (e.button === 2) mouse.right = true;
+    latched.add(`Mouse${e.button}`);
   });
   window.addEventListener("mouseup", (e) => {
     if (e.button === 0) mouse.left = false;
@@ -59,8 +66,10 @@ export function createInput(canvas, viewW, viewH) {
       f.moveX = (any(RIGHT) ? 1 : 0) - (any(LEFT) ? 1 : 0);
       f.moveY = (any(DOWN) ? 1 : 0) - (any(UP) ? 1 : 0);
       if (origin) f.aim = Math.atan2(mouse.y - origin.y, mouse.x - origin.x);
-      f.fire = mouse.left;
-      f.alt = mouse.right;
+      f.fire = mouse.left || latched.has("Mouse0");
+      f.alt = mouse.right || latched.has("Mouse2");
+      f.swap = down.has("KeyQ") || latched.has("KeyQ");
+      latched.clear();
       return f;
     },
 

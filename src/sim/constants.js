@@ -15,4 +15,10 @@ export const PLAYER = {
   h: 10,
   maxSpeed: 1.6, // ≈ 96 px/s
   accel: 0.25, // fraction of the gap to target velocity closed each tick
+  handY: -2, // gun height relative to the hitbox center
+  barrel: 8, // muzzle distance from the hand
+  swapDelay: 8, // ticks before firing after a weapon swap
+  startWeapons: ["pistol", "shotgun", "smg"],
 };
+
+export const BULLET_SIZE = 2;
