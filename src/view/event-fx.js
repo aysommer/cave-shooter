@@ -3,6 +3,7 @@
 // goes over the network, both sides derive it from the same events.
 
 import { WEAPONS, AMMO } from "../data/weapons.js";
+import { MUTATIONS } from "../data/mutations.js";
 
 /** Blood (or goo) color per enemy type, and the darker stain it leaves. */
 const BLOOD = {
@@ -171,6 +172,27 @@ export function createEventFx({ particles, decals, feedback, audio, gunKick, ene
         particles.add({ kind: "ring", x: ev.x, y: ev.y, life: 16, max: 16, r: 22, color: "#7bd88f" });
         particles.burst(ev.x, ev.y, 14, ["#7bd88f", "#ffffff"], 1.6, 20);
         audio?.play("revive", { volume: 1 });
+        break;
+      case "pickupXp":
+        sound("xp", ev, { volume: 0.5 });
+        break;
+      case "levelUp":
+        audio?.play("levelUp", { volume: 1 });
+        particles.add({ kind: "text", x: listener.x, y: listener.y - 30, text: "LEVEL UP!", color: "#7af0d2", life: 70, max: 70 });
+        break;
+      case "chooseStart":
+        audio?.play("mutation", { volume: 0.8 });
+        break;
+      case "mutationPick":
+        particles.add({ kind: "text", x: ev.x, y: ev.y - 12, text: MUTATIONS[ev.mutation]?.label ?? "", color: "#7af0d2", life: 80, max: 80 });
+        if (mine) audio?.play("mutation", { volume: 1 });
+        break;
+      case "dodge":
+        particles.add({ kind: "text", x: ev.x, y: ev.y - 14, text: "DODGE", color: "#ffffff", life: 30, max: 30 });
+        sound("dodge", ev);
+        break;
+      case "victory":
+        audio?.play("victory", { volume: 1 });
         break;
       case "levelStart":
         audio?.play("levelStart", { volume: 0.8 });

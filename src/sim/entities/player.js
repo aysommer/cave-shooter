@@ -8,6 +8,8 @@ import { takeWeapon } from "./pickup.js";
 import { damageEnemy, damagePlayer, centerX, centerY } from "../combat.js";
 import { breakWall } from "../level/level.js";
 import { TILE } from "../constants.js";
+import { mut } from "../../data/mutations.js";
+import { teamDamage } from "../progression.js";
 
 export function startAmmo() {
   return AMMO_TYPES.map((t) => AMMO[t].start);
@@ -41,13 +43,17 @@ export function createPlayer(world, slot, cx, cy) {
     // Own RNG for weapon spread. It depends only on this player's shots, so
     // the guest can predict its own pellets exactly like the host fires them.
     rng: createRng((world.seed ^ Math.imul(slot + 1, 0x9e3779b1)) >>> 0),
+    mutations: {}, // id -> stacks
+    options: [], // mutations offered in the current choice
+    chosen: false,
+    regenTimer: 0,
   };
 }
 
 export function stepPlayer(world, p, input) {
   if (p.invuln > 0) p.invuln--;
   // Movement (a ghost drifts slower and cannot do anything else)
-  const speed = p.dead ? PLAYER.ghostSpeed : PLAYER.maxSpeed;
+  const speed = p.dead ? PLAYER.ghostSpeed : PLAYER.maxSpeed * (1 + 0.12 * mut(p, "quickFeet"));
   let dx = input.moveX;
   let dy = input.moveY;
   if (dx !== 0 && dy !== 0) {
@@ -101,7 +107,7 @@ export function stepPlayer(world, p, input) {
       if (!hasAmmo(p, weapon)) {
         if (pressed) world.events.push({ type: "noAmmo", owner: p.slot, x: centerX(p), y: centerY(p) });
       } else {
-        p.cooldown = weapon.cooldown;
+        p.cooldown = Math.max(1, Math.round(weapon.cooldown * (1 - 0.15 * mut(p, "lightTrigger"))));
         shoot(world, p, weapon);
         if (weapon.burst > 1) {
           p.burstLeft = weapon.burst - 1;
@@ -118,8 +124,26 @@ function hasAmmo(p, weapon) {
   return p.ammo[AMMO_TYPES.indexOf(weapon.ammo)] >= weapon.cost;
 }
 
+/** The weapon as this player fires it: mutations change damage, pellets, bolts... */
+function modded(world, p, w) {
+  let damage = w.damage;
+  if (w.ammo === "bullet") damage += mut(p, "heavyBullets");
+  if (w.ammo === "energy" && mut(p, "overcharge")) damage *= 1.4;
+  damage *= teamDamage(world, p);
+  const out = { ...w, damage, spread: w.spread * Math.pow(0.6, mut(p, "steadyHands")) };
+  if (w.ammo === "shell" && w.count > 1) out.count = w.count + 2 * mut(p, "pepperShot");
+  if (w.projectile === "bolt" && mut(p, "sharpBolts")) {
+    out.pierce = w.pierce + 1;
+    out.speed = w.speed * 1.25;
+  }
+  if (w.explosion && mut(p, "bigBoom")) out.explosion = { ...w.explosion, radius: w.explosion.radius * 1.35, wallRadius: w.explosion.wallRadius * 1.2 };
+  if (w.melee && mut(p, "longArms")) out.melee = { ...w.melee, radius: w.melee.radius * 1.4 };
+  return out;
+}
+
 /** One trigger pull (or one shot of a burst). */
-function shoot(world, p, weapon) {
+function shoot(world, p, base) {
+  const weapon = modded(world, p, base);
   if (weapon.ammo) p.ammo[AMMO_TYPES.indexOf(weapon.ammo)] -= weapon.cost;
 
   const hx = p.x + p.w / 2;

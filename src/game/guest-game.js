@@ -49,7 +49,7 @@ const levelKey = (run, depth) => run * 100000 + depth;
 const PREDICTED_EVENTS = new Set(["shot", "bulletWall", "bulletFade", "swap"]);
 
 /** Player fields that the host is authoritative for. */
-const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "prevUse", "hp", "maxHp", "invuln", "dead", "revive", "burstLeft", "burstTimer"];
+const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "prevUse", "hp", "maxHp", "invuln", "dead", "revive", "burstLeft", "burstTimer", "chosen"];
 
 /**
  * @param {object} o
@@ -145,6 +145,8 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
     lastSnapTick = snap.tick;
     if (levelKey(snap.run, snap.depth) !== key()) enterLevel(local.seed, snap.run, snap.depth);
     local.level.portal.charge = snap.portalCharge;
+    // Freeze own prediction while the host shows the choice / victory screen.
+    local.phase = snap.phase;
     local.level.portal.open = snap.portalOpen;
     latest = snap;
     snaps.push(snap);
@@ -180,13 +182,16 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
     me.rng = { s: server.rng.s };
     me.weapons = [...server.weapons];
     me.ammo = [...server.ammo];
+    me.mutations = { ...server.mutations };
+    me.options = [...server.options];
 
     // Replay what the host has not applied yet. Side effects (bullets,
     // events) go to a throwaway world: they already happened locally.
     // The replay must not count down invulnerability a second time.
     const invuln = me.invuln;
     const scratch = { ...local, entities: [], events: [] };
-    for (const f of pending) stepPlayer(scratch, me, f.input);
+    // Between levels the host does not move heroes, so neither does the replay.
+    if (snap.phase === "play") for (const f of pending) stepPlayer(scratch, me, f.input);
     me.invuln = invuln;
 
     if (fresh) {
@@ -414,6 +419,12 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
         gameOver: latest?.gameOver ?? 0,
         score: latest?.score ?? 0,
         kills: latest?.kills ?? [0, 0],
+        xp: latest?.xp ?? 0,
+        xpLevel: latest?.xpLevel ?? 0,
+        pendingPicks: latest?.pendingPicks ?? 0,
+        phase: latest?.phase ?? "play",
+        choose: latest?.phase === "choose" ? { timer: latest.phaseTimer } : null,
+        victory: latest?.phase === "victory" ? latest.phaseTimer : 0,
         notice: noticeText(),
       };
       lastDisplay = display;

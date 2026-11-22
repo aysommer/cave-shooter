@@ -58,6 +58,7 @@ export function createInput(canvas, viewW, viewH) {
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
   const any = (codes) => codes.some((c) => down.has(c));
+  let queuedChoice = 0;
 
   return {
     mouse,
@@ -75,8 +76,19 @@ export function createInput(canvas, viewW, viewH) {
       f.alt = mouse.right || latched.has("Mouse2");
       f.swap = down.has("KeyQ") || latched.has("KeyQ");
       f.use = down.has("KeyE") || latched.has("KeyE");
+      // Mutation choice: keys 1-4, or a card clicked on the choice screen.
+      for (let i = 1; i <= 4; i++) if (latched.has(`Digit${i}`) || latched.has(`Numpad${i}`)) f.choice = i;
+      if (queuedChoice) {
+        f.choice = queuedChoice;
+        queuedChoice = 0;
+      }
       latched.clear();
       return f;
+    },
+
+    /** A choice made with the mouse on the (DOM) mutation screen. */
+    queueChoice(n) {
+      queuedChoice = n;
     },
 
     /** true once per physical key press (for UI / debug toggles). */

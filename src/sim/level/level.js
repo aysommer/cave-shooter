@@ -10,6 +10,8 @@ import { START_WEAPONS } from "../../data/weapons.js";
 import { spawnChest } from "../entities/pickup.js";
 import { startAmmo } from "../entities/player.js";
 import { CHESTS } from "../../data/loot.js";
+import { mut } from "../../data/mutations.js";
+import { FINAL_DEPTH, VICTORY_TICKS, startChoosing, updateChoosing, regenerate } from "../progression.js";
 import { spawnEnemy } from "../entities/enemy.js";
 import { rngFloat } from "../../core/rng.js";
 
@@ -70,7 +72,9 @@ function spawnEnemies(world, lvl) {
       }
     }
     if (kind === "nest" && ++nests > maxNests) kind = "biter";
-    spawnEnemy(world, kind, sp.x, sp.y);
+    // Deeper enemies are tougher.
+    const e = spawnEnemy(world, kind, sp.x, sp.y);
+    e.hp = e.maxHp = Math.round(e.hp * (1 + 0.08 * (world.depth - 1)));
   }
 }
 
@@ -85,6 +89,12 @@ export function restartRun(world) {
   world.run++;
   world.score = 0;
   world.kills = [0, 0];
+  world.xp = 0;
+  world.xpLevel = 0;
+  world.pendingPicks = 0;
+  world.phase = "play";
+  world.choose = null;
+  world.victory = 0;
   for (const p of world.entities) {
     if (p.type !== "player") continue;
     p.dead = false;
@@ -95,6 +105,10 @@ export function restartRun(world) {
     p.ammo = startAmmo();
     p.cooldown = 0;
     p.burstLeft = 0;
+    p.mutations = {};
+    p.options = [];
+    p.chosen = false;
+    p.regenTimer = 0;
   }
   loadLevel(world, 1);
 }
@@ -103,16 +117,27 @@ export function restartRun(world) {
  * Authoritative level logic, run by the host (or in solo) after step():
  * when every player stands in the open portal long enough, go deeper.
  */
-export function updateLevel(world) {
+export function updateLevel(world, inputs = {}) {
   const portal = world.level.portal;
   const players = world.entities.filter((e) => e.type === "player");
   if (!players.length) return;
+
+  if (world.phase === "choose") {
+    const next = updateChoosing(world, inputs);
+    if (next) loadLevel(world, next);
+    return;
+  }
+  if (world.phase === "victory") {
+    if (--world.victory <= 0) restartRun(world);
+    return;
+  }
 
   if (players.every((p) => p.dead)) {
     if (++world.gameOver >= GAME_OVER_TICKS) restartRun(world);
     return;
   }
   updateRevives(world, players);
+  for (const p of players) regenerate(world, p);
 
   if (!portal.open) {
     if (enemiesAlive(world) > 0) return;
@@ -124,7 +149,25 @@ export function updateLevel(world) {
   const alive = players.filter((p) => !p.dead);
   const inside = alive.every((p) => Math.hypot(p.x + p.w / 2 - portal.x, p.y + p.h / 2 - portal.y) < PORTAL_RADIUS);
   portal.charge = inside ? portal.charge + 1 : Math.max(0, portal.charge - 2);
-  if (portal.charge >= PORTAL_CHARGE_TICKS) loadLevel(world, world.depth + 1);
+  if (portal.charge >= PORTAL_CHARGE_TICKS) leaveLevel(world);
+}
+
+/** Through the portal: victory after the last level, a mutation choice if
+ * the team levelled up, otherwise straight to the next level. */
+function leaveLevel(world) {
+  if (world.depth >= FINAL_DEPTH) {
+    world.phase = "victory";
+    world.victory = VICTORY_TICKS;
+    world.level.portal.charge = 0;
+    world.events.push({ type: "victory", owner: 255, x: 0, y: 0 });
+    return;
+  }
+  if (world.pendingPicks > 0) {
+    world.level.portal.charge = 0;
+    startChoosing(world, world.depth + 1);
+    return;
+  }
+  loadLevel(world, world.depth + 1);
 }
 
 /** How many players are standing in the portal (for the HUD). */
@@ -182,11 +225,13 @@ function updateRevives(world, players) {
     const gx = ghost.x + ghost.w / 2;
     const gy = ghost.y + ghost.h / 2;
     const helper = players.find((p) => !p.dead && Math.hypot(p.x + p.w / 2 - gx, p.y + p.h / 2 - gy) < REVIVE.radius);
-    ghost.revive = helper ? ghost.revive + 1 : Math.max(0, ghost.revive - 2);
+    // Second Wind: the helper revives twice as fast, and the ghost stands up stronger.
+    const fast = helper && mut(helper, "secondWind") ? 2 : 1;
+    ghost.revive = helper ? ghost.revive + fast : Math.max(0, ghost.revive - 2);
     if (ghost.revive >= REVIVE.ticks) {
       ghost.dead = false;
       ghost.revive = 0;
-      ghost.hp = REVIVE.hp;
+      ghost.hp = Math.min(ghost.maxHp, REVIVE.hp + (fast > 1 ? 2 : 0));
       ghost.invuln = REVIVE.invuln;
       world.events.push({ type: "playerRevive", owner: ghost.slot, x: gx, y: gy });
     }

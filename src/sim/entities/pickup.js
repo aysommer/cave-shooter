@@ -8,6 +8,18 @@ import { addEntity } from "../entity.js";
 import { overlaps, centerX, centerY } from "../combat.js";
 import { rectHitsSolid, tileAt, T_FLOOR } from "../level/tilemap.js";
 import { lineOfSight } from "../ai/nav.js";
+import { mut, ENEMY_XP } from "../../data/mutations.js";
+import { addXp } from "../progression.js";
+
+/** Ammo limit and pack size for a player (Big Pockets makes both bigger). */
+export function ammoMax(p, type) {
+  return Math.round(AMMO[type].max * (1 + 0.5 * mut(p, "bigPockets")));
+}
+export function ammoPack(p, type) {
+  return Math.round(AMMO[type].pickup * (1 + 0.25 * mut(p, "bigPockets")));
+}
+
+const MAGNET_RADIUS = 28;
 import { TILE } from "../constants.js";
 
 /**
@@ -46,7 +58,7 @@ export function placeOnFloor(world, e) {
   }
 }
 
-const SIZE = { ammo: 7, health: 7, weapon: 12 };
+const SIZE = { ammo: 7, health: 7, weapon: 12, xp: 4 };
 
 /** kind: "ammo" (with ammo type), "health" or "weapon" (with weapon id). */
 export function spawnPickup(world, kind, cx, cy, extra = {}) {
@@ -81,32 +93,41 @@ function wantedAmmo(world) {
 }
 
 /** A weapon for a chest on this level: from the top three tiers available. */
-export function rollWeapon(world) {
-  const top = maxTier(world.depth);
+export function rollWeapon(world, bonusTier = 0) {
+  const top = Math.min(5, maxTier(world.depth) + bonusTier);
   const pool = WEAPON_IDS.filter((id) => WEAPONS[id].tier <= top && WEAPONS[id].tier >= top - 2 && id !== "revolver");
   return rngPick(world.rng, pool);
 }
 
-/** Maybe drop ammo or health where an enemy died. */
-export function rollDrop(world, x, y, killer) {
+/** Experience crystals (always) and maybe ammo or health where an enemy died. */
+export function rollDrop(world, x, y, killer, kind) {
+  const xp = ENEMY_XP[kind] ?? 2;
+  // Big enemies burst into several crystals.
+  for (let i = 0, n = Math.min(4, Math.ceil(xp / 3)); i < n; i++) {
+    spawnPickup(world, "xp", x + rngRange(world.rng, -4, 4), y + rngRange(world.rng, -4, 4), { value: Math.ceil(xp / n) });
+  }
   const r = rngFloat(world.rng);
   const k = alivePlayers(world).find((p) => p.slot === killer);
   const healthChance = k && k.hp <= k.maxHp / 3 ? DROPS.lowHealthChance : DROPS.healthChance;
+  const ammoChance = DROPS.ammoChance * (1 + 0.5 * (k ? mut(k, "scavenger") : 0));
   if (r < healthChance) spawnPickup(world, "health", x, y);
-  else if (r < healthChance + DROPS.ammoChance) spawnPickup(world, "ammo", x, y, { ammo: wantedAmmo(world) });
+  else if (r < healthChance + ammoChance) spawnPickup(world, "ammo", x, y, { ammo: wantedAmmo(world) });
 }
 
-function openChest(world, c) {
+function openChest(world, c, opener) {
   c.dead = true;
+  const lucky = mut(opener, "lucky");
   const cx = centerX(c);
   const cy = centerY(c);
   world.events.push({ type: "chestOpen", owner: 255, x: cx, y: cy });
   if (c.kind === "weapon") {
-    const id = rollWeapon(world);
+    const id = rollWeapon(world, lucky);
     spawnPickup(world, "weapon", cx, cy, { weapon: id, fresh: true });
-    if (WEAPONS[id].ammo) spawnPickup(world, "ammo", cx + rngRange(world.rng, -6, 6), cy + 5, { ammo: WEAPONS[id].ammo });
+    for (let i = 0; i < 1 + lucky; i++) {
+      if (WEAPONS[id].ammo) spawnPickup(world, "ammo", cx + rngRange(world.rng, -6, 6), cy + 5, { ammo: WEAPONS[id].ammo });
+    }
   } else {
-    for (let i = 0; i < CHESTS.ammoChestPickups; i++) {
+    for (let i = 0; i < CHESTS.ammoChestPickups + lucky; i++) {
       spawnPickup(world, "ammo", cx + rngRange(world.rng, -6, 6), cy + rngRange(world.rng, -3, 4), { ammo: wantedAmmo(world) });
     }
   }
@@ -114,7 +135,7 @@ function openChest(world, c) {
 
 export function stepChest(world, c) {
   for (const p of alivePlayers(world)) {
-    if (overlaps(c, p)) return openChest(world, c);
+    if (overlaps(c, p)) return openChest(world, c, p);
   }
 }
 
@@ -124,13 +145,32 @@ export function stepPickup(world, e) {
     return;
   }
   if (e.kind === "weapon") return; // taken with the "use" key
+  // Crystals (and with Magnet everything) fly to the nearest hero in range.
+  let pull = null;
+  let pullD = Infinity;
+  for (const p of alivePlayers(world)) {
+    const r = MAGNET_RADIUS * (e.kind === "xp" ? 1.6 : 0.6) * (mut(p, "magnet") ? 2.5 : 1);
+    const d = Math.hypot(centerX(p) - centerX(e), centerY(p) - centerY(e));
+    if (d < r && d < pullD) {
+      pull = p;
+      pullD = d;
+    }
+  }
+  if (pull && pullD > 1) {
+    const s = e.kind === "xp" ? 2.6 : 1.8;
+    e.x += ((centerX(pull) - centerX(e)) / pullD) * Math.min(s, pullD);
+    e.y += ((centerY(pull) - centerY(e)) / pullD) * Math.min(s, pullD);
+  }
   for (const p of alivePlayers(world)) {
     if (!overlaps(e, p)) continue;
-    if (e.kind === "ammo") {
-      const max = AMMO[e.ammo].max;
+    if (e.kind === "xp") {
+      addXp(world, e.value ?? 1);
+      world.events.push({ type: "pickupXp", owner: p.slot, x: centerX(e), y: centerY(e) });
+    } else if (e.kind === "ammo") {
+      const max = ammoMax(p, e.ammo);
       const i = AMMO_TYPES.indexOf(e.ammo);
       if (p.ammo[i] >= max) continue; // full: leave it for the partner
-      p.ammo[i] = Math.min(max, p.ammo[i] + AMMO[e.ammo].pickup);
+      p.ammo[i] = Math.min(max, p.ammo[i] + ammoPack(p, e.ammo));
       world.events.push({ type: "pickupAmmo", owner: p.slot, x: centerX(e), y: centerY(e), ammo: e.ammo });
     } else {
       if (p.hp >= p.maxHp) continue;
@@ -174,7 +214,7 @@ export function takeWeapon(world, p) {
   const ammo = WEAPONS[e.weapon].ammo;
   if (e.fresh && ammo) {
     const i = AMMO_TYPES.indexOf(ammo);
-    p.ammo[i] = Math.min(AMMO[ammo].max, p.ammo[i] + AMMO[ammo].pickup);
+    p.ammo[i] = Math.min(ammoMax(p, ammo), p.ammo[i] + ammoPack(p, ammo));
   }
   p.cooldown = Math.max(p.cooldown, 8);
   p.burstLeft = 0;

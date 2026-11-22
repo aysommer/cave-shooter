@@ -33,6 +33,12 @@ export function createWorld(seed, depth = 1, run = 0, { friendlyFire = false } =
     friendlyFire,
     score: 0, // shared by both players
     kills: [0, 0], // per player slot
+    xp: 0, // shared team experience toward the next level-up
+    xpLevel: 0,
+    pendingPicks: 0, // mutation picks earned and not taken yet
+    phase: "play", // play | choose (mutations between levels) | victory
+    choose: null, // { timer, nextDepth } while choosing
+    victory: 0, // ticks left on the victory screen
     tick: 0,
     rng: createRng(seed),
     nextId: 1,
@@ -74,6 +80,8 @@ export function findPlayer(world, slot) {
 export function step(world, inputs) {
   world.tick++;
   world.events = [];
+  // Between levels (choosing mutations, victory) the world stands still.
+  if (world.phase !== "play") return;
 
   const hasEnemies = world.entities.some((e) => e.type === "enemy");
   if (hasEnemies && (!world.nav || world.tick - world.nav.tick >= NAV_EVERY)) {

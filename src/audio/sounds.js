@@ -47,6 +47,23 @@ export const SOUNDS = {
     { wave: "noise", freq: 900, freqEnd: 300, dur: 0.12, volume: 0.25 },
     { wave: "triangle", freq: 500, freqEnd: 1000, dur: 0.2, volume: 0.25, delay: 0.05 },
   ],
+  xp: [{ wave: "sine", freq: 1400, freqEnd: 1900, dur: 0.05, volume: 0.18 }],
+  levelUp: [
+    { wave: "square", freq: 520, dur: 0.08, duty: 0.25, volume: 0.25 },
+    { wave: "square", freq: 660, dur: 0.08, duty: 0.25, volume: 0.25, delay: 0.08 },
+    { wave: "square", freq: 880, dur: 0.16, duty: 0.25, volume: 0.25, delay: 0.16 },
+  ],
+  mutation: [
+    { wave: "sine", freq: 300, freqEnd: 600, dur: 0.3, volume: 0.3, vibrato: 0.6 },
+    { wave: "triangle", freq: 900, freqEnd: 1200, dur: 0.25, volume: 0.15, delay: 0.1 },
+  ],
+  dodge: [{ wave: "noise", freq: 3000, freqEnd: 6000, dur: 0.08, volume: 0.2, lowpass: 0.6 }],
+  victory: [
+    { wave: "square", freq: 523, dur: 0.15, duty: 0.3, volume: 0.25 },
+    { wave: "square", freq: 659, dur: 0.15, duty: 0.3, volume: 0.25, delay: 0.15 },
+    { wave: "square", freq: 784, dur: 0.15, duty: 0.3, volume: 0.25, delay: 0.3 },
+    { wave: "square", freq: 1047, dur: 0.4, duty: 0.3, volume: 0.25, delay: 0.45 },
+  ],
   swap: [{ wave: "square", freq: 900, freqEnd: 1300, dur: 0.05, duty: 0.25, volume: 0.2 }],
   bulletWall: [{ wave: "noise", freq: 5000, freqEnd: 1500, dur: 0.035, volume: 0.12 }],
   enemyShot: [
@@ -92,4 +109,4 @@ export const SOUNDS = {
 };
 
 /** Minimum time between two plays of the same sound (ms), to avoid walls of noise. */
-export const MIN_GAP_MS = { bulletWall: 40, hit: 30, smg: 30, enemyShot: 40, bounce: 40, laser: 30, noAmmo: 120 };
+export const MIN_GAP_MS = { bulletWall: 40, hit: 30, smg: 30, enemyShot: 40, bounce: 40, laser: 30, noAmmo: 120, xp: 25 };

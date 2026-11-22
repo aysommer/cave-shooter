@@ -14,9 +14,10 @@
  * @property {boolean} alt   Secondary action held (hero ability).
  * @property {boolean} swap  Swap weapon held.
  * @property {boolean} use   Use / pick up held.
+ * @property {number} choice Mutation pick 1..4 on the choice screen, 0 = none.
  */
 
 /** @returns {InputFrame} */
 export function emptyInput() {
-  return { moveX: 0, moveY: 0, aim: 0, fire: false, alt: false, swap: false, use: false };
+  return { moveX: 0, moveY: 0, aim: 0, fire: false, alt: false, swap: false, use: false, choice: 0 };
 }

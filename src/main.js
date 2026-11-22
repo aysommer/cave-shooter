@@ -14,6 +14,7 @@ import { createLocalGame } from "./game/local-game.js";
 import { createGuestGame } from "./game/guest-game.js";
 import { createLobby, createRoomBar } from "./ui/lobby.js";
 import { createChat } from "./ui/chat.js";
+import { createMutationScreen } from "./ui/mutations.js";
 import { createAudio } from "./audio/audio.js";
 import { loadSettings, saveSettings } from "./view/settings.js";
 
@@ -27,6 +28,7 @@ const debug = createDebug(renderer);
 const lobby = createLobby(document.getElementById("lobby"));
 const roomBar = createRoomBar(document.getElementById("roombar"));
 const chat = createChat(document.getElementById("chat"));
+const mutationScreen = createMutationScreen(document.getElementById("mutations"), { onPick: (n) => input.queueChoice(n) });
 
 const params = new URLSearchParams(location.search);
 const seedFromUrl = Number(params.get("seed"));
@@ -100,6 +102,7 @@ function run(newGame, { network }) {
       debug.render(game.debugWorld ?? game.world, alpha, view, game.lastInput, game.debugInfo());
       debug.onFrame();
       if (session) roomBar.update(session.status());
+      mutationScreen.update(game.debugWorld ?? game.world, localSlot);
     },
   });
 }

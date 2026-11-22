@@ -232,3 +232,80 @@ body {
   color: var(--muted);
   cursor: pointer;
 }
+
+/* ---- mutation choice ---- */
+
+.mutations {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 10, 18, 0.82);
+  padding: 16px;
+  box-sizing: border-box;
+}
+.mut-card-wrap {
+  width: 100%;
+  max-width: 760px;
+  text-align: center;
+}
+.mut-card-wrap h2 {
+  margin: 0 0 16px;
+  color: #7af0d2;
+  text-shadow: 3px 3px 0 #000;
+  letter-spacing: 1px;
+}
+.mut-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.mut-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 140px;
+  padding: 26px 12px 14px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  box-shadow: 4px 4px 0 #000;
+  cursor: pointer;
+}
+.mut-card:hover:not(:disabled) {
+  border-color: #7af0d2;
+  transform: translateY(-2px);
+}
+.mut-card:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.mut-card b {
+  color: #7af0d2;
+  font-size: 15px;
+}
+.mut-desc {
+  font-size: 13px;
+  line-height: 1.4;
+  color: #c8c0d8;
+}
+.mut-key {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.mut-have {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.mut-status {
+  margin: 6px 0 0;
+  color: var(--warn);
+}

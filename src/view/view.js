@@ -5,6 +5,7 @@
 import { VIEW_W, VIEW_H, TILE, PLAYER, REVIVE } from "../sim/constants.js";
 import { WEAPONS, AMMO, AMMO_TYPES } from "../data/weapons.js";
 import { PICKUP_RANGE } from "../data/loot.js";
+import { xpToNext } from "../data/mutations.js";
 import { BIOMES, levelLabel } from "../data/biomes.js";
 import { PORTAL_CHARGE_TICKS, playersInPortal, enemiesAlive } from "../sim/level/level.js";
 import { ENEMY_OWNER } from "../sim/entities/bullet.js";
@@ -308,7 +309,13 @@ export function createView(renderer, { audio = null, settings }) {
       const blink = e.blink || (e.life > 0 && e.life < 180);
       if (blink && Math.floor(world.tick / 5) % 2 === 0) continue;
       const bob = Math.round(Math.sin(world.tick * 0.08 + e.id) * 1);
-      if (e.kind === "ammo") ctx.drawImage(props.ammo[e.ammo] ?? props.ammo.bullet, x, y + bob);
+      if (e.kind === "xp") {
+        // Experience crystal: a little glowing diamond.
+        const tw = (world.tick + e.id * 5) % 40 < 4;
+        renderer.rect(x + 1, y + bob, 2, 4, "#7af0d2");
+        renderer.rect(x, y + 1 + bob, 4, 2, "#7af0d2");
+        renderer.pixel(x + 1, y + 1 + bob, tw ? "#ffffff" : "#d0fff4");
+      } else if (e.kind === "ammo") ctx.drawImage(props.ammo[e.ammo] ?? props.ammo.bullet, x, y + bob);
       else if (e.kind === "health") ctx.drawImage(props.medkit, x, y + bob);
       else if (e.kind === "weapon") {
         const spr = guns[WEAPONS[e.weapon]?.sprite];
@@ -476,12 +483,19 @@ export function createView(renderer, { audio = null, settings }) {
     else right(`ENEMIES ${left}`, 11, "#ff8a9a");
     right(`SCORE ${world.score ?? 0}`, 19, "#f2c14e");
 
-    // Own health top-left, partner's below it.
+    // Own health top-left, team level and experience under it, partner below.
     if (focus) {
       renderer.text("HP", 3, 3, "#e8e0f0");
       drawHpBar(14, 3, focus, true);
     }
-    let y = 12;
+    const lv = world.xpLevel ?? 0;
+    renderer.text(`LV${lv}`, 3, 11, "#7af0d2");
+    const barX = 14 + renderer.measureText(`${lv}`).w;
+    const need = xpToNext(lv);
+    renderer.rect(barX, 12, 40, 3, "#1e3a3a");
+    renderer.rect(barX, 12, Math.round((40 * Math.min(need, world.xp ?? 0)) / need), 3, "#7af0d2");
+    if ((world.pendingPicks ?? 0) > 0) renderer.text(`+${world.pendingPicks}`, barX + 43, 11, "#f2c14e");
+    let y = 20;
     for (const p of world.entities) {
       if (p.type !== "player" || p === focus || p.slot === focus?.slot) continue;
       renderer.text(`P${p.slot + 1}`, 3, y, COLORS.tag[p.slot] ?? "#fff");
@@ -492,7 +506,14 @@ export function createView(renderer, { audio = null, settings }) {
 
     // Death messages.
     const gameOver = world.gameOver ?? 0;
-    if (gameOver > 0) {
+    if (world.phase === "victory") {
+      ctx.globalAlpha = 0.6;
+      renderer.rect(0, 50, VIEW_W, 50, "#000");
+      ctx.globalAlpha = 1;
+      centerText("RUN COMPLETE!", 58, "#f2c14e");
+      centerText(`SCORE ${world.score ?? 0}   TEAM LEVEL ${lv}`, 70, "#ffffff");
+      centerText(`NEW RUN IN ${Math.max(1, Math.ceil((world.victory ?? 0) / 60))}`, 84, "#b8aecb");
+    } else if (gameOver > 0) {
       const secs = Math.max(1, Math.ceil((GAME_OVER_TICKS - gameOver) / 60));
       centerText("EVERYONE IS DOWN", 70, "#ff5e5e");
       centerText(`NEW RUN IN ${secs}`, 80, "#e8e0f0");

@@ -12,8 +12,9 @@ import { WEAPONS, AMMO_TYPES } from "../data/weapons.js";
 import { PROJECTILE_KINDS, PROJECTILE_SIZE } from "../sim/entities/bullet.js";
 import { ENEMY_KINDS } from "../data/enemies.js";
 import { VIEW_W, VIEW_H } from "../sim/constants.js";
+import { MUTATION_IDS } from "../data/mutations.js";
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 export const MSG_INPUT = 1;
 export const MSG_SNAPSHOT = 2;
@@ -49,12 +50,19 @@ const EVENT_TYPES = [
   "pickupAmmo",
   "pickupHealth",
   "pickupWeapon",
+  "pickupXp",
+  "levelUp",
+  "mutationPick",
+  "chooseStart",
+  "dodge",
+  "victory",
 ];
+const PHASES = ["play", "choose", "victory"];
 /** Events whose aux byte is a weapon id. */
 const WEAPON_EVENTS = new Set(["shot", "swap", "swing", "pickupWeapon"]);
 
 /** Chests and pickups in a snapshot: one byte says what it is. */
-const ITEM_KINDS = ["chest:weapon", "chest:ammo", "pickup:ammo", "pickup:health", "pickup:weapon"];
+const ITEM_KINDS = ["chest:weapon", "chest:ammo", "pickup:ammo", "pickup:health", "pickup:weapon", "pickup:xp"];
 const kindIndex = (k) => Math.max(0, ENEMY_KINDS.indexOf(k));
 
 /**
@@ -141,7 +149,7 @@ export function encodeInputs(frames) {
     w.i8(input.moveX);
     w.i8(input.moveY);
     w.u16(quantizeAim(input.aim));
-    w.u8((input.fire ? 1 : 0) | (input.alt ? 2 : 0) | (input.swap ? 4 : 0) | (input.use ? 8 : 0));
+    w.u8((input.fire ? 1 : 0) | (input.alt ? 2 : 0) | (input.swap ? 4 : 0) | (input.use ? 8 : 0) | ((input.choice & 7) << 4));
   }
   return w.done();
 }
@@ -157,7 +165,7 @@ export function decodeInputs(buf) {
     const moveY = r.i8();
     const aim = dequantizeAim(r.u16());
     const b = r.u8();
-    out.push({ seq, input: { moveX, moveY, aim, fire: !!(b & 1), alt: !!(b & 2), swap: !!(b & 4), use: !!(b & 8) } });
+    out.push({ seq, input: { moveX, moveY, aim, fire: !!(b & 1), alt: !!(b & 2), swap: !!(b & 4), use: !!(b & 8), choice: (b >> 4) & 7 } });
   }
   return out;
 }
@@ -203,6 +211,11 @@ export function encodeSnapshot(world, ack, events, focus = null) {
   w.u32(world.score);
   w.u16(world.kills[0] ?? 0);
   w.u16(world.kills[1] ?? 0);
+  w.u16(world.xp);
+  w.u8(world.xpLevel);
+  w.u8(world.pendingPicks);
+  w.u8(PHASES.indexOf(world.phase));
+  w.u16(world.phase === "choose" ? Math.max(0, world.choose.timer) : world.victory);
 
   w.u8(players.length);
   for (const p of players) {
@@ -219,6 +232,14 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     for (let i = 0; i < AMMO_TYPES.length; i++) w.u8(Math.min(255, p.ammo[i]));
     w.u8(p.burstLeft);
     w.u8(Math.max(0, p.burstTimer));
+    const muts = Object.entries(p.mutations);
+    w.u8(muts.length);
+    for (const [id, n] of muts) {
+      w.u8(MUTATION_IDS.indexOf(id));
+      w.u8(n);
+    }
+    for (let i = 0; i < 4; i++) w.u8(p.options[i] ? MUTATION_IDS.indexOf(p.options[i]) : 255);
+    w.u8(p.chosen ? 1 : 0);
     w.u8(p.hp);
     w.u8(p.maxHp);
     w.u8(p.invuln);
@@ -260,7 +281,7 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     w.u32(e.id);
     const kind = ITEM_KINDS.indexOf(`${e.type}:${e.kind}`);
     w.u8(kind);
-    w.u8(e.kind === "ammo" ? AMMO_TYPES.indexOf(e.ammo) : e.kind === "weapon" ? weaponIndex(e.weapon) : 0);
+    w.u8(e.kind === "ammo" ? AMMO_TYPES.indexOf(e.ammo) : e.kind === "weapon" ? weaponIndex(e.weapon) : e.kind === "xp" ? e.value : 0);
     w.u16(qPos(e.x + e.w / 2));
     w.u16(qPos(e.y + e.h / 2));
     w.u8(e.life > 0 && e.life < 180 ? 1 : 0); // about to vanish: blink
@@ -279,6 +300,7 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     else if (ev.type === "beam") aux = Math.min(255, Math.round(ev.len / 2));
     else if (ev.type === "pickupAmmo") aux = AMMO_TYPES.indexOf(ev.ammo);
     else if (ev.type === "bulletWall") aux = Math.max(0, PROJECTILE_KINDS.indexOf(ev.kind));
+    else if (ev.type === "mutationPick") aux = MUTATION_IDS.indexOf(ev.mutation);
     else aux = kindIndex(ev.kind);
     w.u8(aux);
   }
@@ -298,6 +320,11 @@ export function decodeSnapshot(buf) {
   const gameOver = r.u8();
   const score = r.u32();
   const kills = [r.u16(), r.u16()];
+  const xp = r.u16();
+  const xpLevel = r.u8();
+  const pendingPicks = r.u8();
+  const phase = PHASES[r.u8()] ?? "play";
+  const phaseTimer = r.u16();
 
   const players = [];
   for (let i = 0, n = r.u8(); i < n; i++) {
@@ -321,6 +348,18 @@ export function decodeSnapshot(buf) {
     p.ammo = AMMO_TYPES.map(() => r.u8());
     p.burstLeft = r.u8();
     p.burstTimer = r.u8();
+    p.mutations = {};
+    for (let j = 0, m = r.u8(); j < m; j++) {
+      const id = MUTATION_IDS[r.u8()];
+      const n = r.u8();
+      if (id) p.mutations[id] = n;
+    }
+    p.options = [];
+    for (let j = 0; j < 4; j++) {
+      const k = r.u8();
+      if (k !== 255 && MUTATION_IDS[k]) p.options.push(MUTATION_IDS[k]);
+    }
+    p.chosen = r.u8() === 1;
     p.hp = r.u8();
     p.maxHp = r.u8();
     p.invuln = r.u8();
@@ -377,7 +416,7 @@ export function decodeSnapshot(buf) {
     const x = dqPos(r.u16());
     const y = dqPos(r.u16());
     const blink = r.u8() === 1;
-    const size = type === "chest" ? [12, 9] : kind === "weapon" ? [12, 12] : [7, 7];
+    const size = type === "chest" ? [12, 9] : kind === "weapon" ? [12, 12] : kind === "xp" ? [4, 4] : [7, 7];
     items.push({
       type,
       kind,
@@ -388,6 +427,7 @@ export function decodeSnapshot(buf) {
       h: size[1],
       ammo: kind === "ammo" ? AMMO_TYPES[aux] : undefined,
       weapon: kind === "weapon" ? WEAPON_IDS[aux] : undefined,
+      value: kind === "xp" ? aux : undefined,
       blink,
     });
   }
@@ -403,9 +443,10 @@ export function decodeSnapshot(buf) {
     else if (type === "beam") ev.len = aux * 2;
     else if (type === "pickupAmmo") ev.ammo = AMMO_TYPES[aux];
     else if (type === "bulletWall") ev.kind = PROJECTILE_KINDS[aux];
+    else if (type === "mutationPick") ev.mutation = MUTATION_IDS[aux];
     else ev.kind = ENEMY_KINDS[aux];
     events.push({ tick: evTick, ev });
   }
 
-  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, players, items, enemies, bullets, events, bytes: buf.byteLength };
+  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, xp, xpLevel, pendingPicks, phase, phaseTimer, players, items, enemies, bullets, events, bytes: buf.byteLength };
 }

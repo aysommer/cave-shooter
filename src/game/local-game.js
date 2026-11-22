@@ -90,7 +90,7 @@ export function createLocalGame({ seed, input, view, host = null, friendlyFire =
         if (gi) inputs[1] = gi;
       }
       step(world, inputs);
-      updateLevel(world);
+      updateLevel(world, inputs);
       view.onTick(world.events, world);
       syncLevel();
 
