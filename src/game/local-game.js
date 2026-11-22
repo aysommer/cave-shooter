@@ -13,7 +13,7 @@ export function createLocalGame({ seed, input, view, host = null }) {
   let lastInput = null;
   let pendingEvents = [];
   const snapBytes = [];
-  let sentDepth = world.depth;
+  let sentLevel = `${world.run}:${world.depth}`;
   let sentTiles = 0;
 
   function newWorld(s) {
@@ -32,13 +32,14 @@ export function createLocalGame({ seed, input, view, host = null }) {
   /** Tell the guest about a new level and about broken walls (reliable channel). */
   function syncLevel() {
     if (!host) return;
-    if (world.depth !== sentDepth) {
-      sentDepth = world.depth;
+    const level = `${world.run}:${world.depth}`;
+    if (level !== sentLevel) {
+      sentLevel = level;
       sentTiles = 0;
-      host.send({ t: "level", depth: world.depth, mapHash: world.level.mapHash });
+      host.send({ t: "level", run: world.run, depth: world.depth, mapHash: world.level.mapHash });
     }
     if (world.tileChanges.length > sentTiles) {
-      host.send({ t: "tiles", depth: world.depth, changes: world.tileChanges.slice(sentTiles) });
+      host.send({ t: "tiles", run: world.run, depth: world.depth, changes: world.tileChanges.slice(sentTiles) });
       sentTiles = world.tileChanges.length;
     }
   }
@@ -53,7 +54,7 @@ export function createLocalGame({ seed, input, view, host = null }) {
 
     /** What a joining guest needs to rebuild the world. */
     welcomeInfo() {
-      return { seed: world.seed, depth: world.depth, mapHash: world.level.mapHash, tileChanges: world.tileChanges };
+      return { seed: world.seed, run: world.run, depth: world.depth, mapHash: world.level.mapHash, tileChanges: world.tileChanges };
     },
 
     /** Restart with a new seed (solo only: the guest could not follow). */

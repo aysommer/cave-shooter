@@ -3,6 +3,7 @@ import { WEAPONS } from "../../data/weapons.js";
 import { moveAndCollide, isSolidAt } from "../level/tilemap.js";
 import { createRng, rngRange } from "../../core/rng.js";
 import { spawnBullet } from "./bullet.js";
+import { PLAYER_HP } from "../../data/enemies.js";
 
 export function createPlayer(world, slot, cx, cy) {
   return {
@@ -13,6 +14,10 @@ export function createPlayer(world, slot, cx, cy) {
     w: PLAYER.w,
     h: PLAYER.h,
     aim: 0,
+    hp: PLAYER_HP,
+    maxHp: PLAYER_HP,
+    invuln: 0,
+    dead: false,
     weapons: [...PLAYER.startWeapons],
     wi: 0, // index of the weapon in hand
     cooldown: 0,
@@ -27,6 +32,12 @@ export function createPlayer(world, slot, cx, cy) {
 }
 
 export function stepPlayer(world, p, input) {
+  if (p.invuln > 0) p.invuln--;
+  if (p.dead) {
+    p.vx = p.vy = 0;
+    return;
+  }
+
   // Movement
   let dx = input.moveX;
   let dy = input.moveY;

@@ -75,9 +75,12 @@ function fakeLink({ latency, jitter, loss, seed }) {
   };
 }
 
-function runMatch({ latency, jitter, loss, ticks = 1800 }) {
+const noEnemies = (w) => (w.entities = w.entities.filter((e) => e.type !== "enemy"));
+
+function runMatch({ latency, jitter, loss, ticks = 1800, enemies = false }) {
   const seed = 99;
   const host = createWorld(seed);
+  if (!enemies) noEnemies(host);
   addPlayer(host, 0);
   addPlayer(host, 1);
   const queue = createInputQueue(1);
@@ -93,7 +96,7 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
   const session = {
     slot: 1,
     seed,
-    welcome: { slot: 1, seed, depth: host.depth, mapHash: host.level.mapHash, tileChanges: [] },
+    welcome: { slot: 1, seed, run: host.run, depth: host.depth, mapHash: host.level.mapHash, tileChanges: [] },
     connected: true,
     onSnapshot: (fn) => (handlers.snapshot = fn),
     onMessage: (fn) => (handlers.message = fn),
@@ -129,7 +132,17 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
     step(host, { 0: { moveX: 0, moveY: 0, aim: 0, fire: false, alt: false, swap: false }, 1: queue.take() });
     // Scripted level events: walls broken near the start, then the next level, then more walls.
     if (now === 300 || now === 1200) blast(host, host.spawns[0].x, host.spawns[0].y - 48, 40);
-    if (now === 700) loadLevel(host, host.depth + 1);
+    if (now === 700) {
+      loadLevel(host, host.depth + 1);
+      if (!enemies) noEnemies(host);
+    }
+    if (enemies) {
+      // Keep both heroes alive and enemies awake: this run measures snapshot size.
+      for (const e of host.entities) {
+        if (e.type === "player") e.hp = e.maxHp;
+        if (e.type === "enemy") e.alerted = true;
+      }
+    }
     if (host.depth !== sentDepth) {
       sentDepth = host.depth;
       sentTiles = 0;
@@ -145,7 +158,8 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
       if (ev.type === "shot" && ev.owner === 1) hostGuestShots++;
     }
     if (host.tick % 2 === 0) {
-      const buf = encodeSnapshot(host, queue.appliedSeq, pendingEvents);
+      const hero = findPlayer(host, 1);
+      const buf = encodeSnapshot(host, queue.appliedSeq, pendingEvents, { x: hero.x + 5, y: hero.y + 5 });
       maxBytes = Math.max(maxBytes, buf.byteLength);
       pendingEvents = [];
       down.send(now, buf);
@@ -167,6 +181,7 @@ function runMatch({ latency, jitter, loss, ticks = 1800 }) {
     sameLevel: guest.world.depth === host.depth && host.depth === 2,
     sameMap: hashTiles(guest.world.map) === hashTiles(host.map) && host.tileChanges.length > 0,
     mapCheck: guest.mapCheck,
+    enemiesSeen: guest.debugInfo().lines[1],
   };
 }
 
@@ -177,13 +192,20 @@ for (const cfg of [
   { latency: 8, jitter: 6, loss: 0.1, name: "130 ms RTT, jitter, 10% loss" },
 ]) {
   const r = runMatch(cfg);
-  console.log(`      ${cfg.name}: ${r.info.split(" | ")[2]} shots host/guest ${r.hostGuestShots}/${r.guestShots} starved ${r.starved} skipped ${r.dropped} max snap ${r.maxBytes} B`);
+  console.log(`      ${cfg.name}: ${r.info.split(" | ").find((l) => l.startsWith("PENDING"))} shots host/guest ${r.hostGuestShots}/${r.guestShots} starved ${r.starved} skipped ${r.dropped} max snap ${r.maxBytes} B`);
   check(`${cfg.name}: guest hero ends where the host has it (${r.dist.toFixed(4)} px)`, r.dist < 0.01);
   check(`${cfg.name}: guest followed to level 2, same map incl. broken walls, hash check ${r.mapCheck}`, r.sameLevel && r.sameMap && r.mapCheck === "OK");
   if (cfg.loss === 0 && cfg.jitter === 0) {
     check(`${cfg.name}: every predicted shot also happened on the host`, r.hostGuestShots === r.guestShots);
     check(`${cfg.name}: no starvation`, r.starved <= cfg.latency + 1);
   }
+}
+
+{
+  const r = runMatch({ latency: 5, jitter: 3, loss: 0.05, enemies: true });
+  console.log(`      with enemies: ${r.enemiesSeen}`);
+  check(`full level of awake enemies: max snapshot ${r.maxBytes} B (limit 1200)`, r.maxBytes <= 1200);
+  check(`with enemies: guest still on the same level and map (${r.mapCheck})`, r.sameLevel && r.mapCheck === "OK");
 }
 
 process.exit(failed ? 1 : 0);

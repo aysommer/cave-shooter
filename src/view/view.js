@@ -4,7 +4,10 @@
 import { VIEW_W, VIEW_H, TILE, PLAYER } from "../sim/constants.js";
 import { WEAPONS } from "../data/weapons.js";
 import { BIOMES, levelLabel } from "../data/biomes.js";
-import { PORTAL_CHARGE_TICKS, playersInPortal } from "../sim/level/level.js";
+import { PORTAL_CHARGE_TICKS, playersInPortal, enemiesAlive } from "../sim/level/level.js";
+import { ENEMY_OWNER } from "../sim/entities/bullet.js";
+import { GAME_OVER_TICKS } from "../data/enemies.js";
+import { buildEnemySprites } from "./sprites/enemies.js";
 import { buildFoxSprites, FOX_PALETTE_P2 } from "./sprites/fox.js";
 import { buildWeaponSprites } from "./sprites/weapons.js";
 import { buildPropSprites } from "./sprites/props.js";
@@ -17,6 +20,9 @@ const COLORS = {
   crosshair: "#ffffff",
   tag: ["#f2a65a", "#8fb3e0"],
 };
+
+/** Particle color when an enemy is hit. */
+const BLOOD = { biter: "#c2455b", spitter: "#8fbf4a", tank: "#8a7a68", bomber: "#d96b2b", nest: "#e6d4a0" };
 
 const CAMERA = {
   lookAhead: 0.25, // how far the camera leans toward the cursor
@@ -36,6 +42,7 @@ export function createView(renderer) {
   const heroSprites = [buildFoxSprites(), buildFoxSprites(FOX_PALETTE_P2)];
   const guns = buildWeaponSprites();
   const props = buildPropSprites();
+  const enemySprites = buildEnemySprites();
 
   const camera = { x: 0, y: 0, ready: false };
   let cam = { x: 0, y: 0 }; // rounded camera used for this frame
@@ -44,7 +51,7 @@ export function createView(renderer) {
   let mapCanvas = null;
   let mapFor = null;
   let mapRev = -1;
-  let shownDepth = -1;
+  let shownDepth = "";
   let fade = 0; // black overlay after a level change, 1 -> 0
 
   const fx = []; // particles and flashes
@@ -106,6 +113,24 @@ export function createView(renderer) {
     const pos = drawPos(p, alpha);
     const cx = pos.x + p.w / 2 - cam.x;
     const feet = pos.y + p.h - cam.y;
+
+    if (p.dead) {
+      // Lying on its side, faded.
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      ctx.translate(Math.round(cx), Math.round(feet - 4));
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(fox.idle[0].right, -8, -8);
+      ctx.restore();
+      if (showTag) {
+        const tag = `P${p.slot + 1}`;
+        renderer.text(tag, Math.round(cx - renderer.measureText(tag).w / 2), Math.round(feet - 18), "#8a7fa0");
+      }
+      return;
+    }
+    // Blink while invulnerable after a hit.
+    if (p.invuln > 0 && Math.floor(world.tick / 3) % 2 === 0) return;
+
     const facingLeft = Math.cos(p.aim) < 0;
     const moving = Math.hypot(p.vx, p.vy) > 0.3;
 
@@ -128,7 +153,33 @@ export function createView(renderer) {
     }
   }
 
+  function drawEnemy(world, e, alpha) {
+    const spr = enemySprites[e.kind];
+    if (!spr) return;
+    const pos = drawPos(e, alpha);
+    const cx = pos.x + e.w / 2 - cam.x;
+    const feet = pos.y + e.h - cam.y;
+    if (cx < -20 || cx > VIEW_W + 20 || feet < -10 || feet > VIEW_H + 30) return;
+    const left = e.facing < 0;
+    const fast = e.state === "lunge" || e.kind === "bomber";
+    const frame = spr.frames[Math.floor((world.tick + e.id * 7) / (fast ? 5 : 12)) % 2];
+    // Flash white when hit; blink while winding up an attack or burning a fuse.
+    const warn = e.state === "telegraph" && Math.floor(world.tick / 3) % 2 === 0;
+    const set = e.hurt > 0 || warn ? spr.flash : frame;
+    ctx.drawImage(left ? set.left : set.right, Math.round(cx - spr.w / 2), Math.round(feet - spr.h + 1));
+  }
+
+  function drawEnemyBullet(b, alpha) {
+    const pos = drawPos(b, alpha);
+    const x = Math.round(pos.x - cam.x);
+    const y = Math.round(pos.y - cam.y);
+    renderer.rect(x, y + 1, 4, 2, "#ff5e7a");
+    renderer.rect(x + 1, y, 2, 4, "#ff5e7a");
+    renderer.rect(x + 1, y + 1, 2, 2, "#ffe0e6");
+  }
+
   function drawBullet(b, alpha) {
+    if (b.owner === ENEMY_OWNER) return drawEnemyBullet(b, alpha);
     const pos = drawPos(b, alpha);
     const x = pos.x + b.w / 2 - cam.x;
     const y = pos.y + b.h / 2 - cam.y;
@@ -160,12 +211,35 @@ export function createView(renderer) {
       } else if (ev.type === "bulletFade") {
         fx.push({ kind: "puff", x: ev.x, y: ev.y, life: 6, max: 6 });
       } else if (ev.type === "wallBroken") {
-        for (let i = 0; i < 8; i++) {
-          const a = Math.random() * Math.PI * 2;
-          const s = 0.5 + Math.random() * 1.5;
-          fx.push({ kind: "spark", x: ev.x, y: ev.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 10 + ((Math.random() * 10) | 0), color: "#8a7fa0" });
-        }
+        burst(ev.x, ev.y, 8, ["#8a7fa0", "#5a4870"], 1.5, 18);
+      } else if (ev.type === "enemyHurt") {
+        burst(ev.x, ev.y, 3, [BLOOD[ev.kind] ?? "#c2455b"], 1.2, 10);
+      } else if (ev.type === "enemyDie") {
+        burst(ev.x, ev.y, 12, [BLOOD[ev.kind] ?? "#c2455b", "#ffffff"], 1.8, 18);
+        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 8, max: 8, r: 10, color: "#ffffff" });
+      } else if (ev.type === "playerHurt") {
+        burst(ev.x, ev.y, 6, ["#ff5e5e", "#ffd0d0"], 1.6, 12);
+      } else if (ev.type === "playerDie") {
+        burst(ev.x, ev.y, 18, ["#ff5e5e", "#ffffff", "#e8772e"], 2.2, 24);
+      } else if (ev.type === "explosion") {
+        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 14, max: 14, r: 30, color: "#ffb347" });
+        fx.push({ kind: "flash", x: ev.x, y: ev.y, life: 4, max: 4 });
+        burst(ev.x, ev.y, 24, ["#ffb347", "#ff7a2e", "#fff1d6", "#5a4870"], 2.6, 22);
+      } else if (ev.type === "enemyShot") {
+        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 5, max: 5, r: 6, color: "#ff5e7a" });
+      } else if (ev.type === "enemyHatch") {
+        burst(ev.x, ev.y, 6, ["#e6d4a0", "#6b4a3a"], 1, 12);
+      } else if (ev.type === "portalOpen") {
+        fx.push({ kind: "ring", x: ev.x, y: ev.y, life: 24, max: 24, r: 40, color: "#e6d4ff" });
       }
+    }
+  }
+
+  function burst(x, y, n, colors, speed, life) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = (0.3 + Math.random()) * speed;
+      fx.push({ kind: "spark", x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: Math.round(life * (0.5 + Math.random() * 0.5)), color: colors[i % colors.length] });
     }
   }
 
@@ -196,6 +270,13 @@ export function createView(renderer) {
         renderer.pixel(x, y, f.color);
       } else if (f.kind === "puff") {
         renderer.pixel(x, y, f.life > 3 ? "#8a8296" : "#4d4659");
+      } else if (f.kind === "ring") {
+        const r = f.r * (1 - f.life / f.max) + 2;
+        const n = Math.max(8, Math.round(r * 2));
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          renderer.pixel(x + Math.cos(a) * r, y + Math.sin(a) * r, f.color);
+        }
       }
     }
   }
@@ -226,6 +307,14 @@ export function createView(renderer) {
     const y = P.y - cam.y;
     if (x < -24 || y < -24 || x > VIEW_W + 24 || y > VIEW_H + 24) return;
     const t = world.tick;
+    if (!P.open) {
+      // Closed: a dim, still ring.
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        if (i % 2) renderer.pixel(x + Math.cos(a) * 10, y + Math.sin(a) * 6, colors[2]);
+      }
+      return;
+    }
     const charge = Math.min(1, P.charge / PORTAL_CHARGE_TICKS);
     const r = 11 + Math.sin(t * 0.1) * 1;
 
@@ -255,7 +344,7 @@ export function createView(renderer) {
 
   /** Small arrow at the screen edge pointing to the portal when it is off-screen. */
   function drawPortalArrow(world, focus) {
-    if (!focus) return;
+    if (!focus || !world.level.portal.open) return;
     const P = world.level.portal;
     const sx = P.x - cam.x;
     const sy = P.y - cam.y;
@@ -279,9 +368,52 @@ export function createView(renderer) {
     }
   }
 
+  function drawHpBar(x, y, p, big) {
+    const cells = p.maxHp;
+    const cw = big ? 4 : 2;
+    const ch = big ? 5 : 3;
+    for (let i = 0; i < cells; i++) {
+      const full = i < p.hp;
+      renderer.rect(x + i * (cw + 1), y, cw, ch, full ? "#ff5e5e" : "#3a2633");
+      if (full && big) renderer.rect(x + i * (cw + 1), y, cw, 1, "#ffb0b0");
+    }
+  }
+
+  function centerText(text, y, color) {
+    renderer.text(text, Math.round(VIEW_W / 2 - renderer.measureText(text).w / 2), y, color);
+  }
+
   function drawHud(world, focus) {
-    const lvl = `${levelLabel(world.depth)} ${BIOMES[world.level.biome].label}`;
-    renderer.text(lvl, VIEW_W - renderer.measureText(lvl).w - 3, 3, "#b8aecb");
+    const right = (text, y, color) => renderer.text(text, VIEW_W - renderer.measureText(text).w - 3, y, color);
+    right(`${levelLabel(world.depth)} ${BIOMES[world.level.biome].label}`, 3, "#b8aecb");
+    const left = world.enemiesAlive ?? enemiesAlive(world);
+    if (world.level.portal.open) right("PORTAL OPEN", 11, "#e6d4ff");
+    else right(`ENEMIES ${left}`, 11, "#ff8a9a");
+
+    // Own health top-left, partner's below it.
+    if (focus) {
+      renderer.text("HP", 3, 3, "#e8e0f0");
+      drawHpBar(14, 3, focus, true);
+    }
+    let y = 12;
+    for (const p of world.entities) {
+      if (p.type !== "player" || p === focus || p.slot === focus?.slot) continue;
+      renderer.text(`P${p.slot + 1}`, 3, y, COLORS.tag[p.slot] ?? "#fff");
+      if (p.dead) renderer.text("DOWN", 14, y, "#8a7fa0");
+      else drawHpBar(14, y + 1, p, false);
+      y += 8;
+    }
+
+    // Death messages.
+    const gameOver = world.gameOver ?? 0;
+    if (gameOver > 0) {
+      const secs = Math.max(1, Math.ceil((GAME_OVER_TICKS - gameOver) / 60));
+      centerText("EVERYONE IS DOWN", 70, "#ff5e5e");
+      centerText(`NEW RUN IN ${secs}`, 80, "#e8e0f0");
+    } else if (focus?.dead) {
+      centerText("YOU ARE DOWN", 70, "#ff5e5e");
+      centerText("BACK ON THE NEXT LEVEL", 80, "#e8e0f0");
+    }
 
     const players = world.entities.filter((e) => e.type === "player").length;
     const inPortal = playersInPortal(world);
@@ -316,8 +448,9 @@ export function createView(renderer) {
     },
 
     render(world, alpha, mouse, focus) {
-      if (world.depth !== shownDepth) {
-        shownDepth = world.depth;
+      const levelId = `${world.run}:${world.depth}`;
+      if (levelId !== shownDepth) {
+        shownDepth = levelId;
         camera.ready = false;
         fx.length = 0;
         fade = 1;
@@ -335,8 +468,13 @@ export function createView(renderer) {
       drawChests(world);
 
       // Draw lower entities last so they overlap the ones behind them.
-      const players = world.entities.filter((e) => e.type === "player").sort((a, b) => a.y - b.y);
-      for (const p of players) drawPlayer(world, p, alpha, players.length > 1);
+      const showTags = world.entities.filter((e) => e.type === "player").length > 1;
+      const actors = world.entities.filter((e) => e.type === "player" || e.type === "enemy");
+      actors.sort((a, b) => a.y + a.h - (b.y + b.h) || (a.dead ? -1 : 0));
+      for (const e of actors) {
+        if (e.type === "player") drawPlayer(world, e, alpha, showTags);
+        else drawEnemy(world, e, alpha);
+      }
       for (const e of world.entities) if (e.type === "bullet") drawBullet(e, alpha);
       drawEffects();
 

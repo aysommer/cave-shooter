@@ -3,21 +3,28 @@
 //  - Own hero: predicted locally (input applied at once), then corrected
 //    when the host's snapshot arrives: take the host's state for the last
 //    acknowledged input and replay the inputs the host has not seen yet.
-//    Small corrections are smoothed out visually.
+//    Small corrections are smoothed out visually. Health, damage and death
+//    always come from the host.
 //  - Own bullets: simulated locally (same spread RNG as the host), so shots
-//    appear instantly. The host's copies of them are not drawn.
-//  - Everything else: drawn ~100 ms in the past, interpolated between the
-//    two snapshots around that moment, so it moves smoothly despite jitter.
-//  - Levels: generated locally from (seed, depth), like on the host. Snapshots
-//    carry the depth; broken walls come over the reliable channel. The map
-//    hash from the host confirms both sides built the same cave.
+//    appear instantly. They stop at walls and at the enemies as drawn here;
+//    whether an enemy was really hit is decided by the host. The host's
+//    copies of own bullets are not drawn.
+//  - Everything else (partner, enemies, their bullets): drawn ~100 ms in the
+//    past, interpolated between the two snapshots around that moment, so it
+//    moves smoothly despite jitter. Only entities near the guest are sent.
+//  - Levels: generated locally from (seed, run, depth), like on the host.
+//    Snapshots carry run and depth; broken walls come over the reliable
+//    channel. The map hash from the host confirms both built the same cave.
 
-import { PLAYER, TICK_RATE } from "../sim/constants.js";
+import { PLAYER, TICK_RATE, BULLET_SIZE } from "../sim/constants.js";
 import { createWorld, findPlayer, removePlayer, step } from "../sim/world.js";
 import { addEntity } from "../sim/entity.js";
 import { stepPlayer } from "../sim/entities/player.js";
 import { setTile } from "../sim/level/level.js";
 import { hashTiles } from "../sim/level/generate.js";
+import { overlaps } from "../sim/combat.js";
+import { ENEMIES, ENEMY_BULLET } from "../data/enemies.js";
+import { ENEMY_OWNER } from "../sim/entities/bullet.js";
 import { INPUT_REDUNDANCY, roundAim } from "../net/protocol.js";
 
 const TICKS_PER_MS = TICK_RATE / 1000;
@@ -35,13 +42,16 @@ function lerpAngle(a, b, t) {
   return a + d * t;
 }
 
+/** Orders levels: a new run, or a deeper level in the same run, is "later". */
+const levelKey = (run, depth) => run * 100000 + depth;
+
 /** Player fields that the host is authoritative for. */
-const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "weapons"];
+const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "weapons", "hp", "maxHp", "invuln", "dead"];
 
 export function createGuestGame({ session, input, view }) {
   let slot = session.slot;
   let local = null;
-  const expectedHash = new Map(); // depth -> map hash announced by the host
+  const expectedHash = new Map(); // levelKey -> map hash announced by the host
   let futureTiles = []; // tile changes for a level we have not entered yet
   let mapCheck = "WAIT";
   let seq = 0;
@@ -53,18 +63,26 @@ export function createGuestGame({ session, input, view }) {
   const smooth = { x: 0, y: 0 };
   let lastInput = null;
   let lastDisplay = null;
+  let remoteEnemies = []; // enemies as last drawn, for local bullet hits
+  let latest = null; // newest snapshot header (enemy count, game over)
 
   const stats = { corrections: 0, lastCorrection: 0, snapBytes: [], lateSnaps: 0, levels: 0 };
 
-  /** Builds the local world for `depth` and applies known wall changes. */
-  function enterLevel(seed, depth, tileChanges = []) {
-    local = createWorld(seed, depth);
+  const key = () => levelKey(local.run, local.depth);
+
+  /** Builds the local world for a level and applies known wall changes. */
+  function enterLevel(seed, run, depth, tileChanges = []) {
+    local = createWorld(seed, depth, run);
+    // The guest never simulates enemies: those come from the host.
+    local.entities = [];
     for (const [tx, ty, t] of tileChanges) setTile(local, tx, ty, t);
-    const ready = futureTiles.filter((c) => c.depth === depth);
-    futureTiles = futureTiles.filter((c) => c.depth > depth);
+    const k = key();
+    const ready = futureTiles.filter((c) => c.key === k);
+    futureTiles = futureTiles.filter((c) => c.key > k);
     for (const c of ready) applyTiles(c.changes);
-    snaps = snaps.filter((sn) => sn.depth === depth);
+    snaps = snaps.filter((sn) => levelKey(sn.run, sn.depth) === k);
     remoteEvents = [];
+    remoteEnemies = [];
     smooth.x = smooth.y = 0;
     stats.levels++;
     checkMap();
@@ -72,7 +90,7 @@ export function createGuestGame({ session, input, view }) {
   }
 
   function checkMap() {
-    const want = expectedHash.get(local.depth);
+    const want = expectedHash.get(key());
     if (want === undefined) mapCheck = "WAIT";
     else mapCheck = want === local.level.mapHash ? "OK" : "MISMATCH";
     if (mapCheck === "MISMATCH") console.error(`[guest] map desync on level ${local.depth}: ${local.level.mapHash} vs host ${want}`);
@@ -84,11 +102,12 @@ export function createGuestGame({ session, input, view }) {
 
   function applyWelcome(msg) {
     slot = msg.slot;
-    expectedHash.set(msg.depth, msg.mapHash);
+    const run = msg.run ?? 0;
+    expectedHash.set(levelKey(run, msg.depth), msg.mapHash);
     pending = [];
     lastSnapTick = -1;
     snaps = [];
-    enterLevel(msg.seed, msg.depth, msg.tileChanges ?? []);
+    enterLevel(msg.seed, run, msg.depth, msg.tileChanges ?? []);
   }
   applyWelcome(session.welcome);
 
@@ -96,12 +115,13 @@ export function createGuestGame({ session, input, view }) {
   session.onWelcome(applyWelcome);
 
   session.onMessage((msg) => {
+    const k = levelKey(msg.run ?? 0, msg.depth);
     if (msg.t === "level") {
-      expectedHash.set(msg.depth, msg.mapHash);
-      if (msg.depth === local.depth) checkMap();
+      expectedHash.set(k, msg.mapHash);
+      if (k === key()) checkMap();
     } else if (msg.t === "tiles") {
-      if (msg.depth === local.depth) applyTiles(msg.changes);
-      else if (msg.depth > local.depth) futureTiles.push({ depth: msg.depth, changes: msg.changes });
+      if (k === key()) applyTiles(msg.changes);
+      else if (k > key()) futureTiles.push({ key: k, changes: msg.changes });
     }
   });
 
@@ -111,8 +131,10 @@ export function createGuestGame({ session, input, view }) {
       return; // older than what we have (unordered channel)
     }
     lastSnapTick = snap.tick;
-    if (snap.depth !== local.depth) enterLevel(local.seed, snap.depth);
+    if (levelKey(snap.run, snap.depth) !== key()) enterLevel(local.seed, snap.run, snap.depth);
     local.level.portal.charge = snap.portalCharge;
+    local.level.portal.open = snap.portalOpen;
+    latest = snap;
     snaps.push(snap);
     if (snaps.length > 32) snaps.shift();
 
@@ -146,8 +168,11 @@ export function createGuestGame({ session, input, view }) {
 
     // Replay what the host has not applied yet. Side effects (bullets,
     // events) go to a throwaway world: they already happened locally.
+    // The replay must not count down invulnerability a second time.
+    const invuln = me.invuln;
     const scratch = { ...local, entities: [], events: [] };
     for (const f of pending) stepPlayer(scratch, me, f.input);
+    me.invuln = invuln;
 
     if (fresh) {
       me.px = me.x;
@@ -175,7 +200,7 @@ export function createGuestGame({ session, input, view }) {
     return performance.now() * TICKS_PER_MS + clockOffset - INTERP_TICKS;
   }
 
-  /** Remote players and bullets at time `rt`, interpolated between snapshots. */
+  /** Remote entities at time `rt`, interpolated between snapshots. */
   function interpolate(rt) {
     const out = [];
     if (!snaps.length) return out;
@@ -211,13 +236,27 @@ export function createGuestGame({ session, input, view }) {
       });
     }
 
+    // Enemies: only those known in both snapshots move smoothly; one that
+    // just came into range appears at its newest position.
+    const prevEnemies = new Map(a.enemies.map((e) => [e.id, e]));
+    for (const eb of b.enemies) {
+      const ea = prevEnemies.get(eb.id);
+      if (!ea && span > 0 && t < 0.5) continue;
+      const def = ENEMIES[eb.kind];
+      const x = ea ? lerp(ea.x, eb.x, t) : eb.x;
+      const y = ea ? lerp(ea.y, eb.y, t) : eb.y;
+      const src = t < 0.5 && ea ? ea : eb;
+      out.push({ ...src, w: def.w, h: def.h, x, y, px: x, py: y });
+    }
+
+    const size = (bl) => (bl.owner === ENEMY_OWNER ? ENEMY_BULLET.w : BULLET_SIZE);
     // Bullets fly straight, so a bullet known in `a` can be placed exactly.
     for (const ba of a.bullets) {
       if (ba.owner === slot) continue;
       const dt = rt - a.tick;
       const x = ba.x + ba.vx * dt;
       const y = ba.y + ba.vy * dt;
-      out.push({ ...ba, w: 2, h: 2, x, y, px: x, py: y });
+      out.push({ ...ba, w: size(ba), h: size(ba), x, y, px: x, py: y });
     }
     // Bullets in `b` but not yet in `a` were fired in between: show the part already in flight.
     const known = new Set(a.bullets.map((x) => x.id));
@@ -227,9 +266,25 @@ export function createGuestGame({ session, input, view }) {
       if (back > span * 0.5) continue;
       const x = bb.x - bb.vx * back;
       const y = bb.y - bb.vy * back;
-      out.push({ ...bb, w: 2, h: 2, x, y, px: x, py: y });
+      out.push({ ...bb, w: size(bb), h: size(bb), x, y, px: x, py: y });
     }
     return out;
+  }
+
+  /** Own predicted bullets stop at enemies as they are drawn here. */
+  function clipOwnBullets() {
+    if (!remoteEnemies.length) return;
+    for (const b of local.entities) {
+      if (b.type !== "bullet" || b.dead) continue;
+      for (const e of remoteEnemies) {
+        if (overlaps(b, e)) {
+          b.dead = true;
+          local.events.push({ type: "bulletWall", owner: slot, x: b.x + b.w / 2, y: b.y + b.h / 2 });
+          break;
+        }
+      }
+    }
+    local.entities = local.entities.filter((e) => !e.dead || e.type === "player");
   }
 
   return {
@@ -242,6 +297,9 @@ export function createGuestGame({ session, input, view }) {
     /** What is on screen (remote + predicted), for the debug overlay. */
     get debugWorld() {
       return lastDisplay ?? local;
+    },
+    get mapCheck() {
+      return mapCheck;
     },
     restart() {
       return false;
@@ -263,6 +321,7 @@ export function createGuestGame({ session, input, view }) {
 
       // Predict: own hero and own bullets.
       step(local, { [slot]: inp });
+      clipOwnBullets();
 
       const rt = renderTick();
       const due = [];
@@ -283,6 +342,7 @@ export function createGuestGame({ session, input, view }) {
       if (Math.abs(smooth.y) < 0.05) smooth.y = 0;
 
       const entities = interpolate(renderTick());
+      remoteEnemies = entities.filter((e) => e.type === "enemy");
       let focus = null;
       for (const e of local.entities) {
         if (e.type === "player" && e.slot === slot) {
@@ -290,13 +350,20 @@ export function createGuestGame({ session, input, view }) {
           entities.push(focus);
         } else entities.push(e);
       }
-      const display = { seed: local.seed, map: local.map, tick: local.tick, depth: local.depth, level: local.level, entities, events: [] };
+      const display = {
+        seed: local.seed,
+        run: local.run,
+        map: local.map,
+        tick: local.tick,
+        depth: local.depth,
+        level: local.level,
+        entities,
+        events: [],
+        enemiesAlive: latest?.enemiesAlive ?? 0,
+        gameOver: latest?.gameOver ?? 0,
+      };
       lastDisplay = display;
       view.render(display, alpha, mouse, focus);
-    },
-
-    get mapCheck() {
-      return mapCheck;
     },
 
     nextSeq() {
@@ -305,9 +372,11 @@ export function createGuestGame({ session, input, view }) {
 
     debugInfo() {
       const s = session.netStats();
+      const shown = lastDisplay ? lastDisplay.entities.filter((e) => e.type === "enemy").length : 0;
       return {
         lines: [
-          `LEVEL ${local.depth} MAP ${local.map.w}X${local.map.h} HASH ${hashTiles(local.map).toString(16).toUpperCase()} ${mapCheck}`,
+          `LEVEL ${local.depth} RUN ${local.run} MAP ${local.map.w}X${local.map.h} HASH ${hashTiles(local.map).toString(16).toUpperCase()} ${mapCheck}`,
+          `ENEMIES ${latest?.enemiesAlive ?? 0} SENT ${latest?.enemies.length ?? 0} DRAWN ${shown}`,
           `NET ${s.role} ${session.status().state.toUpperCase()}`,
           `RTT ${Math.round(s.rtt)}MS  IN ${s.kbIn.toFixed(1)}K/S OUT ${s.kbOut.toFixed(1)}K/S`,
           `PENDING ${pending.length}  FIX ${stats.corrections} LAST ${stats.lastCorrection.toFixed(1)}PX`,

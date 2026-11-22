@@ -42,10 +42,10 @@ export function hashTiles(map) {
   return h >>> 0;
 }
 
-export function generateLevel(seed, depth) {
+export function generateLevel(seed, depth, run = 0) {
   const biome = biomeForDepth(depth);
   const b = BIOMES[biome];
-  const rng = createRng(levelSeed(seed, depth));
+  const rng = createRng(levelSeed((seed ^ Math.imul(run, 0x27d4eb2f)) >>> 0, depth));
 
   // ---- dig -----------------------------------------------------------------
   const grid = new Uint8Array(GRID * GRID).fill(T_WALL);

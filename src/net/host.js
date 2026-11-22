@@ -151,7 +151,9 @@ export async function startHost({ getWelcome }) {
 
     sendSnapshot(world, events) {
       if (!guest.connected || !guest.transport?.fastReady) return 0;
-      const buf = encodeSnapshot(world, guest.queue.appliedSeq, events);
+      const hero = world.entities.find((e) => e.type === "player" && e.slot === GUEST_SLOT);
+      const focus = hero ? { x: hero.x + hero.w / 2, y: hero.y + hero.h / 2 } : null;
+      const buf = encodeSnapshot(world, guest.queue.appliedSeq, events, focus);
       guest.transport.sendFast(buf);
       return buf.byteLength;
     },

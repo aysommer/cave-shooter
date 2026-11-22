@@ -14,10 +14,21 @@ import { createPlayer, stepPlayer } from "./entities/player.js";
 import { stepBullet } from "./entities/bullet.js";
 import { addEntity } from "./entity.js";
 import { loadLevel } from "./level/level.js";
+import { stepEnemy, separateEnemies, onEnemyRemoved } from "./entities/enemy.js";
+import { buildFlowField } from "./ai/nav.js";
 
-export function createWorld(seed, depth = 1) {
+/** How often enemies' flow field toward the players is rebuilt (ticks). */
+const NAV_EVERY = 10;
+
+/**
+ * @param {number} seed
+ * @param {number} [depth]  level number, 1-based
+ * @param {number} [run]    how many times the run restarted after everyone died
+ */
+export function createWorld(seed, depth = 1, run = 0) {
   const world = {
     seed: seed >>> 0,
+    run,
     tick: 0,
     rng: createRng(seed),
     nextId: 1,
@@ -26,6 +37,8 @@ export function createWorld(seed, depth = 1) {
     level: null, // portal, chests, enemy spawn points, map hash (see level.js)
     spawns: [],
     tileChanges: [], // [tx, ty, tile] since the level started (walls broken etc.)
+    gameOver: 0, // ticks since every player died (0 = someone is alive)
+    nav: null, // { tick, dist[] } flow field toward the players, for enemies
     entities: [],
     // Things that happened during the last step (shots, hits, ...). The view
     // turns them into effects and sounds; the network replicates them.
@@ -58,6 +71,11 @@ export function step(world, inputs) {
   world.tick++;
   world.events = [];
 
+  const hasEnemies = world.entities.some((e) => e.type === "enemy");
+  if (hasEnemies && (!world.nav || world.tick - world.nav.tick >= NAV_EVERY)) {
+    world.nav = { tick: world.tick, dist: buildFlowField(world) };
+  }
+
   // Entities spawned during this loop (bullets) are appended and also get
   // their first update in the same tick, so they leave the muzzle at once.
   for (let i = 0; i < world.entities.length; i++) {
@@ -67,10 +85,18 @@ export function step(world, inputs) {
     e.py = e.y;
 
     if (e.type === "player") stepPlayer(world, e, inputs[e.slot] ?? emptyInput());
+    else if (e.dead) continue; // killed earlier this tick
     else if (e.type === "bullet") stepBullet(world, e);
+    else if (e.type === "enemy") stepEnemy(world, e);
   }
+  if (hasEnemies) separateEnemies(world);
 
-  if (world.entities.some((e) => e.dead)) {
-    world.entities = world.entities.filter((e) => !e.dead);
+  // Dead players stay in the world (as a body); everything else goes.
+  if (world.entities.some((e) => e.dead && e.type !== "player")) {
+    world.entities = world.entities.filter((e) => {
+      if (!e.dead || e.type === "player") return true;
+      if (e.type === "enemy") onEnemyRemoved(world, e);
+      return false;
+    });
   }
 }
