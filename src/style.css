@@ -177,3 +177,58 @@ body {
 .roombar .wait {
   color: var(--muted);
 }
+
+/* ---- chat ---- */
+
+.chat {
+  position: fixed;
+  left: 12px;
+  bottom: 44px;
+  width: min(420px, calc(100vw - 24px));
+  font-size: 14px;
+  pointer-events: none;
+}
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.chat-line {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px 6px;
+  background: rgba(11, 10, 18, 0.75);
+  overflow-wrap: anywhere;
+  transition: opacity 1s;
+}
+.chat-line.old {
+  opacity: 0;
+}
+.chat-line.p1 b {
+  color: #f2a65a;
+}
+.chat-line.p2 b {
+  color: #8fb3e0;
+}
+.chat-form {
+  pointer-events: auto;
+}
+.chat-form input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 6px 8px;
+  background: rgba(11, 10, 18, 0.9);
+  color: var(--text);
+  border: 2px solid var(--edge);
+}
+
+.ff-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}

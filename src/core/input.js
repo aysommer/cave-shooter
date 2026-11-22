@@ -47,7 +47,9 @@ export function createInput(canvas, viewW, viewH) {
   canvas.addEventListener("mousedown", (e) => {
     if (e.button === 0) mouse.left = true;
     if (e.button === 2) mouse.right = true;
+    if (e.button === 1) e.preventDefault(); // middle click: no autoscroll
     latched.add(`Mouse${e.button}`);
+    pressed.add(`Mouse${e.button}`);
   });
   window.addEventListener("mouseup", (e) => {
     if (e.button === 0) mouse.left = false;

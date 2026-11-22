@@ -49,9 +49,13 @@ const levelKey = (run, depth) => run * 100000 + depth;
 const PREDICTED_EVENTS = new Set(["shot", "bulletWall", "bulletFade", "swap"]);
 
 /** Player fields that the host is authoritative for. */
-const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "weapons", "hp", "maxHp", "invuln", "dead"];
+const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "weapons", "hp", "maxHp", "invuln", "dead", "revive"];
 
-export function createGuestGame({ session, input, view }) {
+/**
+ * @param {object} o
+ * @param {(msg: object) => void} [o.onSocial]  pings and chat from the host
+ */
+export function createGuestGame({ session, input, view, onSocial = () => {} }) {
   let slot = session.slot;
   let local = null;
   const expectedHash = new Map(); // levelKey -> map hash announced by the host
@@ -74,8 +78,10 @@ export function createGuestGame({ session, input, view }) {
   const key = () => levelKey(local.run, local.depth);
 
   /** Builds the local world for a level and applies known wall changes. */
+  let friendlyFire = false;
+
   function enterLevel(seed, run, depth, tileChanges = []) {
-    local = createWorld(seed, depth, run);
+    local = createWorld(seed, depth, run, { friendlyFire });
     // The guest never simulates enemies: those come from the host.
     local.entities = [];
     for (const [tx, ty, t] of tileChanges) setTile(local, tx, ty, t);
@@ -105,6 +111,7 @@ export function createGuestGame({ session, input, view }) {
 
   function applyWelcome(msg) {
     slot = msg.slot;
+    friendlyFire = !!msg.friendlyFire;
     const run = msg.run ?? 0;
     expectedHash.set(levelKey(run, msg.depth), msg.mapHash);
     pending = [];
@@ -125,7 +132,7 @@ export function createGuestGame({ session, input, view }) {
     } else if (msg.t === "tiles") {
       if (k === key()) applyTiles(msg.changes);
       else if (k > key()) futureTiles.push({ key: k, changes: msg.changes });
-    }
+    } else onSocial(msg);
   });
 
   session.onSnapshot((snap) => {
@@ -275,6 +282,14 @@ export function createGuestGame({ session, input, view }) {
     return out;
   }
 
+  /** Banner over the game while the link to the host is down. */
+  function noticeText() {
+    const st = session.status();
+    if (st.state === "lost") return `CONNECTION LOST - RECONNECTING ${st.secondsLeft}`;
+    if (st.state === "host-left") return "THE HOST LEFT THE GAME";
+    return "";
+  }
+
   /** Own predicted bullets stop at enemies as they are drawn here. */
   function clipOwnBullets() {
     if (!remoteEnemies.length) return;
@@ -346,7 +361,8 @@ export function createGuestGame({ session, input, view }) {
       if (Math.abs(smooth.y) < 0.05) smooth.y = 0;
 
       const entities = interpolate(renderTick());
-      remoteEnemies = entities.filter((e) => e.type === "enemy");
+      // What own bullets can visibly hit here: enemies, and the partner with friendly fire.
+      remoteEnemies = entities.filter((e) => e.type === "enemy" || (friendlyFire && e.type === "player" && e.slot !== slot && !e.dead));
       let focus = null;
       for (const e of local.entities) {
         if (e.type === "player" && e.slot === slot) {
@@ -365,6 +381,9 @@ export function createGuestGame({ session, input, view }) {
         events: [],
         enemiesAlive: latest?.enemiesAlive ?? 0,
         gameOver: latest?.gameOver ?? 0,
+        score: latest?.score ?? 0,
+        kills: latest?.kills ?? [0, 0],
+        notice: noticeText(),
       };
       lastDisplay = display;
       view.render(display, alpha, mouse, focus);

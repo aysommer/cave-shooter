@@ -13,6 +13,7 @@ import { joinRoom } from "./net/client.js";
 import { createLocalGame } from "./game/local-game.js";
 import { createGuestGame } from "./game/guest-game.js";
 import { createLobby, createRoomBar } from "./ui/lobby.js";
+import { createChat } from "./ui/chat.js";
 import { createAudio } from "./audio/audio.js";
 import { loadSettings, saveSettings } from "./view/settings.js";
 
@@ -25,6 +26,7 @@ const view = createView(renderer, { audio, settings });
 const debug = createDebug(renderer);
 const lobby = createLobby(document.getElementById("lobby"));
 const roomBar = createRoomBar(document.getElementById("roombar"));
+const chat = createChat(document.getElementById("chat"));
 
 const params = new URLSearchParams(location.search);
 const seedFromUrl = Number(params.get("seed"));
@@ -32,6 +34,38 @@ const seed = Number.isFinite(seedFromUrl) && seedFromUrl > 0 ? seedFromUrl : 133
 
 let game = null;
 let session = null; // host or guest network session
+let localSlot = 0;
+let lastPingAt = 0;
+
+// ---- pings and chat ----------------------------------------------------------
+// Social messages ("mark" = look-here ping, "chat") go over the reliable channel.
+// Not "ping": that name is the transport's own RTT probe. The sender's slot is taken
+// from who sent it (host = 0, guest = 1), never from the message itself.
+
+function showSocial(slot, msg) {
+  if (msg?.t === "mark" && Number.isFinite(msg.x) && Number.isFinite(msg.y)) view.addPing(slot, msg.x, msg.y);
+  else if (msg?.t === "chat" && typeof msg.text === "string") {
+    chat.add(slot, msg.text);
+    audio.play("chat");
+  }
+}
+
+function sendSocial(msg) {
+  showSocial(localSlot, msg);
+  session?.send(msg);
+}
+
+function socialKeys() {
+  if (input.consumePressed("KeyE") || input.consumePressed("Mouse1")) {
+    const now = performance.now();
+    if (now - lastPingAt > 500) {
+      lastPingAt = now;
+      const p = view.toWorld(input.mouse.x, input.mouse.y);
+      sendSocial({ t: "mark", x: Math.round(p.x), y: Math.round(p.y) });
+    }
+  }
+  if (input.consumePressed("Enter") && session) chat.openInput();
+}
 
 function run(newGame, { network }) {
   game = newGame;
@@ -56,6 +90,7 @@ function run(newGame, { network }) {
         saveSettings(settings);
         view.toast(settings.shake ? "SCREEN SHAKE ON" : "SCREEN SHAKE OFF");
       }
+      socialKeys();
       game.update();
       debug.onTick(game.world);
       input.endFrame();
@@ -71,12 +106,14 @@ function run(newGame, { network }) {
 
 lobby.onSolo(() => run(createLocalGame({ seed, input, view }), { network: false }));
 
-lobby.onHost(async () => {
+lobby.onHost(async ({ friendlyFire }) => {
   lobby.busy("Создаём комнату…");
   try {
     let localGame = null;
     session = await startHost({ getWelcome: () => localGame.welcomeInfo() });
-    localGame = createLocalGame({ seed, input, view, host: session });
+    localGame = createLocalGame({ seed, input, view, host: session, friendlyFire });
+    session.onMessage((msg) => showSocial(1, msg));
+    chat.enable((text) => sendSocial({ t: "chat", text }));
     history.replaceState(null, "", location.pathname);
     roomBar.show(session.code, "host");
     run(localGame, { network: true });
@@ -92,7 +129,9 @@ async function join(code) {
   try {
     let guestGame = null;
     session = await joinRoom(code, { nextSeq: () => guestGame?.nextSeq() ?? 1 });
-    guestGame = createGuestGame({ session, input, view });
+    guestGame = createGuestGame({ session, input, view, onSocial: (msg) => showSocial(0, msg) });
+    localSlot = session.slot;
+    chat.enable((text) => sendSocial({ t: "chat", text }));
     history.replaceState(null, "", `${location.pathname}?join=${code}`);
     roomBar.show(code, "guest");
     run(guestGame, { network: true });

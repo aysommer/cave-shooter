@@ -12,7 +12,7 @@ import { WEAPONS } from "../data/weapons.js";
 import { ENEMY_KINDS } from "../data/enemies.js";
 import { VIEW_W, VIEW_H } from "../sim/constants.js";
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export const MSG_INPUT = 1;
 export const MSG_SNAPSHOT = 2;
@@ -38,6 +38,7 @@ const EVENT_TYPES = [
   "enemyHatch",
   "explosion",
   "portalOpen",
+  "playerRevive",
 ];
 const kindIndex = (k) => Math.max(0, ENEMY_KINDS.indexOf(k));
 
@@ -182,6 +183,9 @@ export function encodeSnapshot(world, ack, events, focus = null) {
   w.u8(world.level.portal.open ? 1 : 0);
   w.u16(alive);
   w.u8(Math.min(255, world.gameOver));
+  w.u32(world.score);
+  w.u16(world.kills[0] ?? 0);
+  w.u16(world.kills[1] ?? 0);
 
   w.u8(players.length);
   for (const p of players) {
@@ -198,6 +202,7 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     w.u8(p.hp);
     w.u8(p.maxHp);
     w.u8(p.invuln);
+    w.u8(Math.min(255, p.revive));
     w.u32(p.rng.s);
     w.u8(p.weapons.length);
     for (const id of p.weapons) w.u8(weaponIndex(id));
@@ -253,6 +258,8 @@ export function decodeSnapshot(buf) {
   const portalOpen = r.u8() === 1;
   const enemiesAlive = r.u16();
   const gameOver = r.u8();
+  const score = r.u32();
+  const kills = [r.u16(), r.u16()];
 
   const players = [];
   for (let i = 0, n = r.u8(); i < n; i++) {
@@ -275,6 +282,7 @@ export function decodeSnapshot(buf) {
     p.hp = r.u8();
     p.maxHp = r.u8();
     p.invuln = r.u8();
+    p.revive = r.u8();
     p.rng = { s: r.u32() };
     p.weapons = [];
     for (let j = 0, m = r.u8(); j < m; j++) p.weapons.push(WEAPON_IDS[r.u8()]);
@@ -328,5 +336,5 @@ export function decodeSnapshot(buf) {
     events.push({ tick: evTick, ev });
   }
 
-  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, players, enemies, bullets, events, bytes: buf.byteLength };
+  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, players, enemies, bullets, events, bytes: buf.byteLength };
 }

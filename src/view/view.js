@@ -2,7 +2,7 @@
 // Everything here (camera, particles, decals, shake, sound) is cosmetic and
 // local; see event-fx.js for how simulation events turn into effects.
 
-import { VIEW_W, VIEW_H, TILE, PLAYER } from "../sim/constants.js";
+import { VIEW_W, VIEW_H, TILE, PLAYER, REVIVE } from "../sim/constants.js";
 import { WEAPONS } from "../data/weapons.js";
 import { BIOMES, levelLabel } from "../data/biomes.js";
 import { PORTAL_CHARGE_TICKS, playersInPortal, enemiesAlive } from "../sim/level/level.js";
@@ -75,6 +75,8 @@ export function createView(renderer, { audio = null, settings }) {
   let haveScene = false;
 
   const lastDust = {}; // slot -> time of the last running dust puff
+  const pings = []; // { slot, x, y, until }
+  const PING_MS = 4000;
   let toast = { text: "", until: 0 };
 
   // ---- camera ------------------------------------------------------------
@@ -135,16 +137,22 @@ export function createView(renderer, { audio = null, settings }) {
     const feet = pos.y + p.h - cam.y;
 
     if (p.dead) {
-      // Lying on its side, faded.
-      ctx.save();
-      ctx.globalAlpha = 0.6;
-      ctx.translate(Math.round(cx), Math.round(feet - 4));
-      ctx.rotate(Math.PI / 2);
-      ctx.drawImage(fox.idle[0].right, -8, -8);
-      ctx.restore();
+      // Ghost: see-through, bobbing, with the revive meter around it.
+      const bob = Math.round(Math.sin(world.tick * 0.08 + p.slot) * 2);
+      ctx.globalAlpha = 0.4 + (p.revive / REVIVE.ticks) * 0.4;
+      const ghostImg = Math.cos(p.aim) < 0 ? fox.idle[0].left : fox.idle[0].right;
+      ctx.drawImage(ghostImg, Math.round(cx - 8), Math.round(feet - 17 + bob));
+      ctx.globalAlpha = 1;
+      if (p.revive > 0) {
+        const n = Math.round((p.revive / REVIVE.ticks) * 28);
+        for (let i = 0; i < n; i++) {
+          const a = (i / 28) * Math.PI * 2 - Math.PI / 2;
+          renderer.pixel(cx + Math.cos(a) * 13, feet - 8 + Math.sin(a) * 13, "#7bd88f");
+        }
+      }
       if (showTag) {
         const tag = `P${p.slot + 1}`;
-        renderer.text(tag, Math.round(cx - renderer.measureText(tag).w / 2), Math.round(feet - 18), "#8a7fa0");
+        renderer.text(tag, Math.round(cx - renderer.measureText(tag).w / 2), Math.round(feet - 25 + bob), "#8a7fa0");
       }
       return;
     }
@@ -268,12 +276,50 @@ export function createView(renderer, { audio = null, settings }) {
     }
   }
 
-  /** Small arrow at the screen edge pointing to the portal when it is off-screen. */
+  /** Arrow at the screen edge pointing to the portal when it is off-screen. */
   function drawPortalArrow(world, focus) {
     if (!focus || !world.level.portal.open) return;
     const P = world.level.portal;
-    const sx = P.x - cam.x;
-    const sy = P.y - cam.y;
+    edgeArrow(P.x, P.y, BIOMES[world.level.biome].palette.portal[0]);
+  }
+
+  /** Arrows to the partner (and its ghost) when it is off-screen. */
+  function drawPartnerArrows(world, focus) {
+    if (!focus) return;
+    for (const p of world.entities) {
+      if (p.type !== "player" || p.slot === focus.slot) continue;
+      edgeArrow(p.x + p.w / 2, p.y + p.h / 2, p.dead ? "#8a7fa0" : COLORS.tag[p.slot] ?? "#fff", `P${p.slot + 1}`);
+    }
+  }
+
+  function drawPings() {
+    const now = performance.now();
+    for (let i = pings.length - 1; i >= 0; i--) if (pings[i].until < now) pings.splice(i, 1);
+    for (const pg of pings) {
+      const color = COLORS.tag[pg.slot] ?? "#fff";
+      const x = Math.round(pg.x - cam.x);
+      const y = Math.round(pg.y - cam.y);
+      const age = (PING_MS - (pg.until - now)) / 1000;
+      // A diamond with "!" bouncing above the spot, and a ring on the ground.
+      const by = y - 10 - Math.round(Math.abs(Math.sin(age * 5)) * 3);
+      for (let d = 0; d <= 4; d++) {
+        renderer.rect(x - d, by - 4 + d, d * 2 + 1, 1, color);
+        renderer.rect(x - d, by + 4 - d, d * 2 + 1, 1, color);
+      }
+      renderer.rect(x, by - 2, 1, 3, "#14101a");
+      renderer.pixel(x, by + 2, "#14101a");
+      const r = 4 + ((age * 12) % 8);
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        renderer.pixel(x + Math.cos(a) * r, y + Math.sin(a) * r * 0.5, color);
+      }
+      edgeArrow(pg.x, pg.y, color, "!");
+    }
+  }
+
+  function edgeArrow(wx, wy, color, label = "") {
+    const sx = wx - cam.x;
+    const sy = wy - cam.y;
     const margin = 8;
     if (sx >= margin && sy >= margin && sx <= VIEW_W - margin && sy <= VIEW_H - margin) return;
     const cx = VIEW_W / 2;
@@ -282,7 +328,6 @@ export function createView(renderer, { audio = null, settings }) {
     const k = Math.min((VIEW_W / 2 - margin) / Math.abs(Math.cos(a) || 1e-6), (VIEW_H / 2 - margin) / Math.abs(Math.sin(a) || 1e-6));
     const ax = cx + Math.cos(a) * k;
     const ay = cy + Math.sin(a) * k;
-    const color = BIOMES[world.level.biome].palette.portal[0];
     // Filled triangle: tip at (ax, ay), widening backwards.
     const ux = Math.cos(a);
     const uy = Math.sin(a);
@@ -291,6 +336,10 @@ export function createView(renderer, { audio = null, settings }) {
       for (let w = -half; w <= half; w += 0.5) {
         renderer.pixel(ax - ux * d - uy * w, ay - uy * d + ux * w, color);
       }
+    }
+    if (label) {
+      const m = renderer.measureText(label);
+      renderer.text(label, Math.round(ax - ux * 12 - m.w / 2), Math.round(ay - uy * 12 - 2), color);
     }
   }
 
@@ -315,6 +364,7 @@ export function createView(renderer, { audio = null, settings }) {
     const left = world.enemiesAlive ?? enemiesAlive(world);
     if (world.level.portal.open) right("PORTAL OPEN", 11, "#e6d4ff");
     else right(`ENEMIES ${left}`, 11, "#ff8a9a");
+    right(`SCORE ${world.score ?? 0}`, 19, "#f2c14e");
 
     // Own health top-left, partner's below it.
     if (focus) {
@@ -337,8 +387,18 @@ export function createView(renderer, { audio = null, settings }) {
       centerText("EVERYONE IS DOWN", 70, "#ff5e5e");
       centerText(`NEW RUN IN ${secs}`, 80, "#e8e0f0");
     } else if (focus?.dead) {
-      centerText("YOU ARE DOWN", 70, "#ff5e5e");
-      centerText("BACK ON THE NEXT LEVEL", 80, "#e8e0f0");
+      centerText("YOU ARE A GHOST", 62, "#c8c0d8");
+      centerText("GET NEXT TO YOUR PARTNER TO BE REVIVED", 72, "#e8e0f0");
+      centerText("OR WAIT FOR THE NEXT LEVEL", 80, "#8a7fa0");
+    } else if (focus) {
+      const ghost = world.entities.find((p) => p.type === "player" && p.dead && p.slot !== focus.slot);
+      if (ghost) centerText(`P${ghost.slot + 1} IS DOWN - STAND NEXT TO THE GHOST`, VIEW_H - 32, "#7bd88f");
+    }
+    if (world.notice) {
+      renderer.ctx.globalAlpha = 0.7;
+      renderer.rect(0, 84, VIEW_W, 13, "#000");
+      renderer.ctx.globalAlpha = 1;
+      centerText(world.notice, 88, "#f2c14e");
     }
 
     const players = world.entities.filter((e) => e.type === "player").length;
@@ -420,6 +480,19 @@ export function createView(renderer, { audio = null, settings }) {
       feedback.reset();
     },
 
+    /** Screen point → world point (camera without shake). */
+    toWorld(x, y) {
+      return { x: x + camBase.x, y: y + camBase.y };
+    },
+
+    /** A "look here!" marker from a player, shown for a few seconds. */
+    addPing(slot, x, y) {
+      // One ping per player at a time.
+      for (let i = pings.length - 1; i >= 0; i--) if (pings[i].slot === slot) pings.splice(i, 1);
+      pings.push({ slot, x, y, until: performance.now() + PING_MS });
+      audio?.play("ping", { volume: 0.9 });
+    },
+
     /** Short message at the bottom of the screen (settings changes etc.). */
     toast(text) {
       toast = { text, until: performance.now() + 1500 };
@@ -454,7 +527,9 @@ export function createView(renderer, { audio = null, settings }) {
         haveScene = true;
       }
 
+      drawPings();
       drawPortalArrow(world, focus);
+      drawPartnerArrows(world, focus);
       drawHud(world, focus);
       drawOverlays();
       if (fade > 0) {

@@ -26,6 +26,14 @@ export function spawnEnemyBullet(world, x, y, angle, speed, damage) {
   });
 }
 
+/** Who a bullet can hit: enemy bullets hit players; player bullets hit
+ * enemies, and the other player too when friendly fire is on. */
+export function canHit(world, b, e) {
+  if (b.owner === ENEMY_OWNER) return e.type === "player";
+  if (e.type === "enemy") return true;
+  return world.friendlyFire && e.type === "player" && e.slot !== b.owner;
+}
+
 export function stepBullet(world, b) {
   b.x += b.vx;
   b.y += b.vy;
@@ -44,8 +52,7 @@ export function stepBullet(world, b) {
   const kx = b.vx / speed;
   const ky = b.vy / speed;
   for (const e of world.entities) {
-    if (e.dead) continue;
-    if (b.owner === ENEMY_OWNER ? e.type !== "player" : e.type !== "enemy") continue;
+    if (e.dead || !canHit(world, b, e)) continue;
     if (!overlaps(b, e)) continue;
     if (e.type === "player") {
       // Invulnerable players let bullets pass (no "eating" shots while blinking).

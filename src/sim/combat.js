@@ -20,6 +20,7 @@ export function damagePlayer(world, p, amount, kx = 0, ky = 0) {
   world.events.push({ type: "playerHurt", owner: p.slot, x: centerX(p), y: centerY(p) });
   if (p.hp === 0) {
     p.dead = true;
+    p.revive = 0;
     p.vx = p.vy = 0;
     world.events.push({ type: "playerDie", owner: p.slot, x: centerX(p), y: centerY(p) });
   }
@@ -43,6 +44,11 @@ export function damageEnemy(world, e, amount, kx = 0, ky = 0, from = -1) {
 export function killEnemy(world, e, from = -1) {
   if (e.dead) return;
   e.dead = true;
+  // Shared score; kills are also counted per player for the end screen.
+  if (from >= 0) {
+    world.score += ENEMIES[e.kind].score;
+    world.kills[from] = (world.kills[from] ?? 0) + 1;
+  }
   world.events.push({ type: "enemyDie", owner: from, kind: e.kind, x: centerX(e), y: centerY(e) });
   const def = ENEMIES[e.kind];
   if (def.explosion) explode(world, centerX(e), centerY(e), def.explosion);

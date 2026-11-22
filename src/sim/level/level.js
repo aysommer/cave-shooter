@@ -5,7 +5,7 @@ import { TILE } from "../constants.js";
 import { T_FLOOR, T_WALL } from "./tilemap.js";
 import { generateLevel } from "./generate.js";
 import { BIOME_ENEMIES, GAME_OVER_TICKS, PLAYER_HP } from "../../data/enemies.js";
-import { PLAYER } from "../constants.js";
+import { PLAYER, REVIVE } from "../constants.js";
 import { spawnEnemy } from "../entities/enemy.js";
 import { rngFloat } from "../../core/rng.js";
 
@@ -41,6 +41,7 @@ export function loadLevel(world, depth) {
     if (p.dead) {
       // A fallen partner comes back on the next level with half health.
       p.dead = false;
+      p.revive = 0;
       p.hp = Math.ceil(p.maxHp / 2);
     }
   }
@@ -77,6 +78,8 @@ export function enemiesAlive(world) {
 /** Everyone died: start over from level 1 with a new layout. */
 export function restartRun(world) {
   world.run++;
+  world.score = 0;
+  world.kills = [0, 0];
   for (const p of world.entities) {
     if (p.type !== "player") continue;
     p.dead = false;
@@ -102,6 +105,7 @@ export function updateLevel(world) {
     if (++world.gameOver >= GAME_OVER_TICKS) restartRun(world);
     return;
   }
+  updateRevives(world, players);
 
   if (!portal.open) {
     if (enemiesAlive(world) > 0) return;
@@ -159,4 +163,25 @@ export function blast(world, x, y, radius) {
     }
   }
   return n;
+}
+
+/**
+ * Co-op revive: a living partner standing next to a ghost fills its revive
+ * meter; stepping away drains it. When full, the ghost is back on its feet.
+ */
+function updateRevives(world, players) {
+  for (const ghost of players) {
+    if (!ghost.dead) continue;
+    const gx = ghost.x + ghost.w / 2;
+    const gy = ghost.y + ghost.h / 2;
+    const helper = players.find((p) => !p.dead && Math.hypot(p.x + p.w / 2 - gx, p.y + p.h / 2 - gy) < REVIVE.radius);
+    ghost.revive = helper ? ghost.revive + 1 : Math.max(0, ghost.revive - 2);
+    if (ghost.revive >= REVIVE.ticks) {
+      ghost.dead = false;
+      ghost.revive = 0;
+      ghost.hp = REVIVE.hp;
+      ghost.invuln = REVIVE.invuln;
+      world.events.push({ type: "playerRevive", owner: ghost.slot, x: gx, y: gy });
+    }
+  }
 }

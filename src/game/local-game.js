@@ -8,7 +8,7 @@ export const LOCAL_SLOT = 0;
 /** Snapshot every N ticks (2 -> 30 Hz). */
 export const SNAPSHOT_EVERY = 2;
 
-export function createLocalGame({ seed, input, view, host = null }) {
+export function createLocalGame({ seed, input, view, host = null, friendlyFire = false }) {
   let world = newWorld(seed);
   let lastInput = null;
   let pendingEvents = [];
@@ -17,7 +17,7 @@ export function createLocalGame({ seed, input, view, host = null }) {
   let sentTiles = 0;
 
   function newWorld(s) {
-    const w = createWorld(s);
+    const w = createWorld(s, 1, 0, { friendlyFire });
     addPlayer(w, LOCAL_SLOT);
     return w;
   }
@@ -54,7 +54,14 @@ export function createLocalGame({ seed, input, view, host = null }) {
 
     /** What a joining guest needs to rebuild the world. */
     welcomeInfo() {
-      return { seed: world.seed, run: world.run, depth: world.depth, mapHash: world.level.mapHash, tileChanges: world.tileChanges };
+      return {
+        seed: world.seed,
+        run: world.run,
+        depth: world.depth,
+        mapHash: world.level.mapHash,
+        tileChanges: world.tileChanges,
+        friendlyFire: world.friendlyFire,
+      };
     },
 
     /** Restart with a new seed (solo only: the guest could not follow). */

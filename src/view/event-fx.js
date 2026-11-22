@@ -127,6 +127,11 @@ export function createEventFx({ particles, decals, feedback, audio, gunKick, ene
         particles.add({ kind: "ring", x: ev.x, y: ev.y, life: 24, max: 24, r: 40, color: "#e6d4ff" });
         audio?.play("portalOpen", { volume: 0.9 });
         break;
+      case "playerRevive":
+        particles.add({ kind: "ring", x: ev.x, y: ev.y, life: 16, max: 16, r: 22, color: "#7bd88f" });
+        particles.burst(ev.x, ev.y, 14, ["#7bd88f", "#ffffff"], 1.6, 20);
+        audio?.play("revive", { volume: 1 });
+        break;
       case "levelStart":
         audio?.play("levelStart", { volume: 0.8 });
         break;

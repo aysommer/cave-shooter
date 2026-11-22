@@ -18,6 +18,7 @@ export function createPlayer(world, slot, cx, cy) {
     maxHp: PLAYER_HP,
     invuln: 0,
     dead: false,
+    revive: 0, // revive progress while a ghost, 0..REVIVE.ticks
     weapons: [...PLAYER.startWeapons],
     wi: 0, // index of the weapon in hand
     cooldown: 0,
@@ -33,25 +34,26 @@ export function createPlayer(world, slot, cx, cy) {
 
 export function stepPlayer(world, p, input) {
   if (p.invuln > 0) p.invuln--;
-  if (p.dead) {
-    p.vx = p.vy = 0;
-    return;
-  }
-
-  // Movement
+  // Movement (a ghost drifts slower and cannot do anything else)
+  const speed = p.dead ? PLAYER.ghostSpeed : PLAYER.maxSpeed;
   let dx = input.moveX;
   let dy = input.moveY;
   if (dx !== 0 && dy !== 0) {
     dx *= Math.SQRT1_2;
     dy *= Math.SQRT1_2;
   }
-  p.vx += (dx * PLAYER.maxSpeed - p.vx) * PLAYER.accel;
-  p.vy += (dy * PLAYER.maxSpeed - p.vy) * PLAYER.accel;
+  p.vx += (dx * speed - p.vx) * PLAYER.accel;
+  p.vy += (dy * speed - p.vy) * PLAYER.accel;
   if (Math.abs(p.vx) < 0.01) p.vx = 0;
   if (Math.abs(p.vy) < 0.01) p.vy = 0;
   moveAndCollide(world.map, p);
 
   p.aim = input.aim;
+  if (p.dead) {
+    p.prevFire = input.fire;
+    p.prevSwap = input.swap;
+    return;
+  }
 
   // Weapon swap
   if (input.swap && !p.prevSwap && p.weapons.length > 1) {

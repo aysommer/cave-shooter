@@ -161,6 +161,10 @@ export async function joinRoom(code, { nextSeq }) {
     onMessage(fn) {
       handlers.message = fn;
     },
+    /** Reliable message to the host (pings, chat). */
+    send(msg) {
+      if (state === "connected") transport.send(msg);
+    },
     sendInputs(frames) {
       if (state === "connected") transport.sendFast(encodeInputs(frames));
     },

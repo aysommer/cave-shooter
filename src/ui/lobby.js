@@ -10,20 +10,23 @@ export function createLobby(root) {
       <h1>CAVE SHOOTER</h1>
       <p class="lobby-sub">Кооператив на двоих по сети</p>
       <button class="btn btn-main" data-act="host">Создать игру</button>
+      <label class="ff-row"><input type="checkbox" name="ff" /> Дружественный огонь (для новой игры)</label>
       <form class="join-row" data-act="join">
         <input name="code" maxlength="9" autocomplete="off" spellcheck="false" placeholder="Код комнаты" aria-label="Код комнаты" />
         <button class="btn" type="submit">Войти</button>
       </form>
       <button class="btn btn-ghost" data-act="solo">Играть одному</button>
       <p class="lobby-status" role="status"></p>
-      <p class="lobby-help">WASD — движение, мышь — прицел, ЛКМ — огонь, Q — сменить оружие, F1 — отладка, F2 — имитация плохой сети</p>
+      <p class="lobby-help">WASD — движение, мышь — прицел, ЛКМ — огонь, Q — сменить оружие, E или колесо — метка «сюда!», Enter — чат, M — звук, F3 — тряска, F1 — отладка, F2 — имитация плохой сети</p>
     </div>`;
 
   const status = root.querySelector(".lobby-status");
   const buttons = root.querySelectorAll("button, input");
   const handlers = { host: () => {}, join: () => {}, solo: () => {} };
 
-  root.querySelector('[data-act="host"]').addEventListener("click", () => handlers.host());
+  root.querySelector('[data-act="host"]').addEventListener("click", () =>
+    handlers.host({ friendlyFire: root.querySelector('input[name="ff"]').checked }),
+  );
   root.querySelector('[data-act="solo"]').addEventListener("click", () => handlers.solo());
   root.querySelector('[data-act="join"]').addEventListener("submit", (e) => {
     e.preventDefault();

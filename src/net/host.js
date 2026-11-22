@@ -30,7 +30,7 @@ export async function startHost({ getWelcome }) {
     }
   }
 
-  const handlers = { join: () => {}, leave: () => {}, status: () => {} };
+  const handlers = { join: () => {}, leave: () => {}, status: () => {}, message: () => {} };
 
   const guest = {
     present: false, // has a hero in the world (connected or within grace period)
@@ -62,7 +62,12 @@ export async function startHost({ getWelcome }) {
         t.close("bye");
         return;
       }
-      if (msg?.t !== "hello" || accepted) return;
+      if (msg?.t !== "hello") {
+        // Social messages (pings, chat) from the accepted guest.
+        if (accepted && t === guest.transport && msg) handlers.message(msg);
+        return;
+      }
+      if (accepted) return;
       if (msg.v !== PROTOCOL_VERSION) return reject(t, "version");
       if (guest.present && guest.token !== msg.token) return reject(t, "full");
 
@@ -127,6 +132,10 @@ export async function startHost({ getWelcome }) {
     },
     onStatus(fn) {
       handlers.status = fn;
+    },
+    /** Pings and chat from the guest. */
+    onMessage(fn) {
+      handlers.message = fn;
     },
 
     /** Input to apply to the guest's hero this tick, or null if there is no guest. */

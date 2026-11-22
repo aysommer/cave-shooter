@@ -25,10 +25,13 @@ const NAV_EVERY = 10;
  * @param {number} [depth]  level number, 1-based
  * @param {number} [run]    how many times the run restarted after everyone died
  */
-export function createWorld(seed, depth = 1, run = 0) {
+export function createWorld(seed, depth = 1, run = 0, { friendlyFire = false } = {}) {
   const world = {
     seed: seed >>> 0,
     run,
+    friendlyFire,
+    score: 0, // shared by both players
+    kills: [0, 0], // per player slot
     tick: 0,
     rng: createRng(seed),
     nextId: 1,

@@ -19,6 +19,10 @@ export const PLAYER = {
   barrel: 8, // muzzle distance from the hand
   swapDelay: 8, // ticks before firing after a weapon swap
   startWeapons: ["pistol", "shotgun", "smg"],
+  ghostSpeed: 0.8, // a fallen hero drifts around as a ghost
 };
+
+/** Co-op revive: stand this close to a ghost for this long to bring it back. */
+export const REVIVE = { radius: 22, ticks: 150, hp: 3, invuln: 90 };
 
 export const BULLET_SIZE = 2;

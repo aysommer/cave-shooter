@@ -42,6 +42,15 @@ export const SOUNDS = {
     { wave: "sine", freq: 300, freqEnd: 900, dur: 0.6, volume: 0.35, vibrato: 0.5 },
     { wave: "triangle", freq: 600, freqEnd: 1800, dur: 0.5, volume: 0.15, delay: 0.1 },
   ],
+  revive: [
+    { wave: "triangle", freq: 400, freqEnd: 800, dur: 0.15, volume: 0.35 },
+    { wave: "triangle", freq: 600, freqEnd: 1200, dur: 0.2, volume: 0.3, delay: 0.12 },
+  ],
+  ping: [
+    { wave: "sine", freq: 1320, dur: 0.08, volume: 0.3 },
+    { wave: "sine", freq: 1760, dur: 0.12, volume: 0.25, delay: 0.08 },
+  ],
+  chat: [{ wave: "triangle", freq: 980, freqEnd: 1100, dur: 0.06, volume: 0.2 }],
   levelStart: [
     { wave: "sine", freq: 1100, freqEnd: 260, dur: 0.45, volume: 0.35, vibrato: 0.3 },
     { wave: "triangle", freq: 550, freqEnd: 130, dur: 0.45, volume: 0.15 },

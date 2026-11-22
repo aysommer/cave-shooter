@@ -7,7 +7,8 @@ import { spawnEnemy } from "../src/sim/entities/enemy.js";
 import { explode } from "../src/sim/combat.js";
 import { ENEMIES, GAME_OVER_TICKS } from "../src/data/enemies.js";
 import { emptyInput } from "../src/sim/input-frame.js";
-import { TILE } from "../src/sim/constants.js";
+import { TILE, REVIVE, PLAYER } from "../src/sim/constants.js";
+import { spawnBullet } from "../src/sim/entities/bullet.js";
 
 let failed = 0;
 function check(name, ok) {
@@ -119,6 +120,62 @@ function arena(seed = 11) {
   }
   const ms = (performance.now() - t0) / 600;
   check(`${n} awake enemies: ${ms.toFixed(3)} ms per tick (budget 2 ms)`, ms < 2);
+}
+
+// 7. Co-op: a ghost drifts slowly; a partner standing next to it revives it.
+{
+  const w = createWorld(17);
+  w.entities = w.entities.filter((e) => e.type !== "enemy");
+  const a = addPlayer(w, 0);
+  const b = addPlayer(w, 1);
+  b.hp = 1;
+  explode(w, b.x + 5, b.y + 5, { radius: 6, damage: 5 });
+  const startX = b.x;
+  const right = { ...emptyInput(), moveX: 1 };
+  for (let t = 0; t < 30; t++) step(w, { 0: emptyInput(), 1: right });
+  const ghostSpeed = (b.x - startX) / 30;
+  check(`ghost drifts slower than a hero (${ghostSpeed.toFixed(2)} px/tick, max ${PLAYER.ghostSpeed})`, b.dead && ghostSpeed > 0.3 && ghostSpeed <= PLAYER.ghostSpeed + 0.01);
+  // partner far away: no progress
+  a.x = b.x + 200;
+  for (let t = 0; t < 60; t++) { step(w, { 0: emptyInput(), 1: emptyInput() }); updateLevel(w); }
+  const noHelp = b.dead && b.revive === 0;
+  // partner next to the ghost
+  a.x = b.x + 8;
+  a.y = b.y;
+  let revivedAt = -1;
+  for (let t = 0; t < REVIVE.ticks + 10 && revivedAt < 0; t++) {
+    step(w, { 0: emptyInput(), 1: emptyInput() });
+    updateLevel(w);
+    if (w.events.some((e) => e.type === "playerRevive")) revivedAt = t;
+  }
+  check(`partner revives the ghost after ${revivedAt} ticks (needs ${REVIVE.ticks}), hp ${b.hp}`, noHelp && !b.dead && b.hp === REVIVE.hp && b.invuln > 0);
+}
+
+// 8. Friendly fire is off by default and hits the partner when switched on.
+for (const ff of [false, true]) {
+  const w = createWorld(18, 1, 0, { friendlyFire: ff });
+  w.entities = w.entities.filter((e) => e.type !== "enemy");
+  const a = addPlayer(w, 0);
+  const b = addPlayer(w, 1);
+  spawnBullet(w, { owner: 0, x: b.x - 6, y: b.y + 4, vx: 3, vy: 0, life: 10, damage: 2 });
+  for (let t = 0; t < 5; t++) step(w, { 0: emptyInput(), 1: emptyInput() });
+  check(`friendly fire ${ff ? "on: partner hit" : "off: partner safe"} (hp ${b.hp}/${b.maxHp})`, ff ? b.hp < b.maxHp : b.hp === b.maxHp);
+}
+
+// 9. Shared score and per-player kills.
+{
+  const { w, p } = arena(19);
+  // The start area is always open floor.
+  const e1 = spawnEnemy(w, "biter", w.spawns[0].x, w.spawns[0].y);
+  const e2 = spawnEnemy(w, "tank", w.spawns[1].x, w.spawns[1].y);
+  p.x += 400; // out of the way
+  w.events = [];
+  for (const e of [e1, e2]) e.hp = 1;
+  spawnBullet(w, { owner: 0, x: e1.x, y: e1.y + 2, vx: 0.1, vy: 0, life: 3, damage: 3 });
+  spawnBullet(w, { owner: 1, x: e2.x, y: e2.y + 2, vx: 0.1, vy: 0, life: 3, damage: 3 });
+  step(w, { 0: emptyInput() });
+  const want = ENEMIES.biter.score + ENEMIES.tank.score;
+  check(`shared score ${w.score} (= ${want}), kills per player ${w.kills.join("/")}`, w.score === want && w.kills[0] === 1 && w.kills[1] === 1);
 }
 
 process.exit(failed ? 1 : 0);
