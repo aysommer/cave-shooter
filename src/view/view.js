@@ -9,7 +9,7 @@ import { PORTAL_CHARGE_TICKS, playersInPortal, enemiesAlive } from "../sim/level
 import { ENEMY_OWNER } from "../sim/entities/bullet.js";
 import { GAME_OVER_TICKS } from "../data/enemies.js";
 import { buildEnemySprites } from "./sprites/enemies.js";
-import { buildFoxSprites, FOX_PALETTE_P2 } from "./sprites/fox.js";
+import { buildHeroSprites, HERO_FRAME_H } from "./sprites/heroes.js";
 import { buildWeaponSprites } from "./sprites/weapons.js";
 import { buildPropSprites } from "./sprites/props.js";
 import { renderMap } from "./map-renderer.js";
@@ -44,8 +44,9 @@ export function drawPos(e, alpha) {
  */
 export function createView(renderer, { audio = null, settings }) {
   const ctx = renderer.ctx;
-  // Per player slot. Real hero choice comes in stage 9.
-  const heroSprites = [buildFoxSprites(), buildFoxSprites(FOX_PALETTE_P2)];
+  // Hero per player slot until the hero select screen (stage 9): P1 fox, P2 toad.
+  const SLOT_HERO = ["fox", "toad"];
+  const heroSprites = Object.fromEntries(["fox", "toad", "goose", "dog"].map((id) => [id, buildHeroSprites(id)]));
   const guns = buildWeaponSprites();
   const props = buildPropSprites();
   const enemySprites = buildEnemySprites();
@@ -130,18 +131,45 @@ export function createView(renderer, { audio = null, settings }) {
     ctx.restore();
   }
 
+  /** Soft dark oval under a character. */
+  function shadow(cx, feet, w) {
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(Math.round(cx), Math.round(feet), w / 2, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  /** "P1" / "P2" badge with a little pointer, floating over a hero. */
+  function drawTag(text, cx, bottom, color) {
+    const m = renderer.measureText(text);
+    const w = m.w + 4;
+    const x = Math.round(cx - w / 2);
+    const y = Math.round(bottom - 11);
+    renderer.rect(x - 1, y - 1, w + 2, 9, "#1a1020");
+    renderer.rect(x, y, w, 7, color);
+    renderer.text(text, x + 2, y + 1, "#1a1020", null);
+    renderer.rect(Math.round(cx) - 2, y + 8, 5, 1, "#1a1020");
+    renderer.rect(Math.round(cx) - 1, y + 8, 3, 1, color);
+    renderer.rect(Math.round(cx) - 1, y + 9, 3, 1, "#1a1020");
+    renderer.pixel(Math.round(cx), y + 9, color);
+    renderer.pixel(Math.round(cx), y + 10, "#1a1020");
+  }
+
   function drawPlayer(world, p, alpha, showTag) {
-    const fox = heroSprites[p.slot] ?? heroSprites[0];
+    const fox = heroSprites[SLOT_HERO[p.slot] ?? "fox"];
     const pos = drawPos(p, alpha);
     const cx = pos.x + p.w / 2 - cam.x;
     const feet = pos.y + p.h - cam.y;
+    const top = feet - HERO_FRAME_H + 1;
 
     if (p.dead) {
       // Ghost: see-through, bobbing, with the revive meter around it.
       const bob = Math.round(Math.sin(world.tick * 0.08 + p.slot) * 2);
       ctx.globalAlpha = 0.4 + (p.revive / REVIVE.ticks) * 0.4;
       const ghostImg = Math.cos(p.aim) < 0 ? fox.idle[0].left : fox.idle[0].right;
-      ctx.drawImage(ghostImg, Math.round(cx - 8), Math.round(feet - 17 + bob));
+      ctx.drawImage(ghostImg, Math.round(cx - 8), Math.round(top - 2 + bob));
       ctx.globalAlpha = 1;
       if (p.revive > 0) {
         const n = Math.round((p.revive / REVIVE.ticks) * 28);
@@ -150,10 +178,7 @@ export function createView(renderer, { audio = null, settings }) {
           renderer.pixel(cx + Math.cos(a) * 13, feet - 8 + Math.sin(a) * 13, "#7bd88f");
         }
       }
-      if (showTag) {
-        const tag = `P${p.slot + 1}`;
-        renderer.text(tag, Math.round(cx - renderer.measureText(tag).w / 2), Math.round(feet - 25 + bob), "#8a7fa0");
-      }
+      if (showTag) drawTag(`P${p.slot + 1}`, cx, top - 3 + bob, "#8a7fa0");
       return;
     }
     // Blink while invulnerable after a hit.
@@ -171,14 +196,12 @@ export function createView(renderer, { audio = null, settings }) {
     const hy = pos.y + p.h / 2 + PLAYER.handY - cam.y;
     const gunBehind = Math.sin(p.aim) < -0.35; // aiming up: gun goes behind the body
 
+    shadow(cx, feet, 13);
     if (gunBehind) drawWeapon(p, hx, hy, facingLeft);
-    ctx.drawImage(img, Math.round(cx - 8), Math.round(feet - 15));
+    ctx.drawImage(img, Math.round(cx - 8), Math.round(top));
     if (!gunBehind) drawWeapon(p, hx, hy, facingLeft);
 
-    if (showTag) {
-      const tag = `P${p.slot + 1}`;
-      renderer.text(tag, Math.round(cx - renderer.measureText(tag).w / 2), Math.round(feet - 23), COLORS.tag[p.slot] ?? "#fff");
-    }
+    if (showTag) drawTag(`P${p.slot + 1}`, cx, top - 1, COLORS.tag[p.slot] ?? "#fff");
   }
 
   function drawEnemy(world, e, alpha) {
@@ -194,6 +217,7 @@ export function createView(renderer, { audio = null, settings }) {
     // Flash white when hit; blink while winding up an attack or burning a fuse.
     const warn = e.state === "telegraph" && Math.floor(world.tick / 3) % 2 === 0;
     const set = e.hurt > 0 || warn ? spr.flash : frame;
+    shadow(cx, feet, spr.w - 2);
     ctx.drawImage(left ? set.left : set.right, Math.round(cx - spr.w / 2), Math.round(feet - spr.h + 1));
   }
 
