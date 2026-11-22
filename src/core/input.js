@@ -74,6 +74,7 @@ export function createInput(canvas, viewW, viewH) {
       f.fire = mouse.left || latched.has("Mouse0");
       f.alt = mouse.right || latched.has("Mouse2");
       f.swap = down.has("KeyQ") || latched.has("KeyQ");
+      f.use = down.has("KeyE") || latched.has("KeyE");
       latched.clear();
       return f;
     },

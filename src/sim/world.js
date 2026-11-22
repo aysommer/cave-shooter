@@ -16,6 +16,7 @@ import { addEntity } from "./entity.js";
 import { loadLevel } from "./level/level.js";
 import { stepEnemy, separateEnemies, onEnemyRemoved } from "./entities/enemy.js";
 import { buildFlowField } from "./ai/nav.js";
+import { stepPickup, stepChest } from "./entities/pickup.js";
 
 /** How often enemies' flow field toward the players is rebuilt (ticks). */
 const NAV_EVERY = 10;
@@ -91,6 +92,8 @@ export function step(world, inputs) {
     else if (e.dead) continue; // killed earlier this tick
     else if (e.type === "bullet") stepBullet(world, e);
     else if (e.type === "enemy") stepEnemy(world, e);
+    else if (e.type === "pickup") stepPickup(world, e);
+    else if (e.type === "chest") stepChest(world, e);
   }
   if (hasEnemies) separateEnemies(world);
 

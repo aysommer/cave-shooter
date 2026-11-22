@@ -8,11 +8,12 @@
 //
 // No browser APIs here, so Node tests can round-trip packets.
 
-import { WEAPONS } from "../data/weapons.js";
+import { WEAPONS, AMMO_TYPES } from "../data/weapons.js";
+import { PROJECTILE_KINDS, PROJECTILE_SIZE } from "../sim/entities/bullet.js";
 import { ENEMY_KINDS } from "../data/enemies.js";
 import { VIEW_W, VIEW_H } from "../sim/constants.js";
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export const MSG_INPUT = 1;
 export const MSG_SNAPSHOT = 2;
@@ -39,7 +40,21 @@ const EVENT_TYPES = [
   "explosion",
   "portalOpen",
   "playerRevive",
+  "noAmmo",
+  "swing",
+  "beam",
+  "deflect",
+  "bounce",
+  "chestOpen",
+  "pickupAmmo",
+  "pickupHealth",
+  "pickupWeapon",
 ];
+/** Events whose aux byte is a weapon id. */
+const WEAPON_EVENTS = new Set(["shot", "swap", "swing", "pickupWeapon"]);
+
+/** Chests and pickups in a snapshot: one byte says what it is. */
+const ITEM_KINDS = ["chest:weapon", "chest:ammo", "pickup:ammo", "pickup:health", "pickup:weapon"];
 const kindIndex = (k) => Math.max(0, ENEMY_KINDS.indexOf(k));
 
 /**
@@ -126,7 +141,7 @@ export function encodeInputs(frames) {
     w.i8(input.moveX);
     w.i8(input.moveY);
     w.u16(quantizeAim(input.aim));
-    w.u8((input.fire ? 1 : 0) | (input.alt ? 2 : 0) | (input.swap ? 4 : 0));
+    w.u8((input.fire ? 1 : 0) | (input.alt ? 2 : 0) | (input.swap ? 4 : 0) | (input.use ? 8 : 0));
   }
   return w.done();
 }
@@ -142,7 +157,7 @@ export function decodeInputs(buf) {
     const moveY = r.i8();
     const aim = dequantizeAim(r.u16());
     const b = r.u8();
-    out.push({ seq, input: { moveX, moveY, aim, fire: !!(b & 1), alt: !!(b & 2), swap: !!(b & 4) } });
+    out.push({ seq, input: { moveX, moveY, aim, fire: !!(b & 1), alt: !!(b & 2), swap: !!(b & 4), use: !!(b & 8) } });
   }
   return out;
 }
@@ -163,6 +178,7 @@ export function encodeSnapshot(world, ack, events, focus = null) {
   const players = [];
   const bullets = [];
   const enemies = [];
+  const items = [];
   let alive = 0;
   for (const e of world.entities) {
     if (e.type === "player") players.push(e);
@@ -170,6 +186,7 @@ export function encodeSnapshot(world, ack, events, focus = null) {
       if (!e.dead) alive++;
       if (near(e)) enemies.push(e);
     } else if (e.type === "bullet" && near(e)) bullets.push(e);
+    else if ((e.type === "pickup" || e.type === "chest") && !e.dead && near(e)) items.push(e);
   }
   const evs = events.filter((x) => world.tick - x.tick < 256 && (!focus || x.ev.x === undefined || near({ x: x.ev.x, y: x.ev.y, w: 0, h: 0 }))).slice(-255);
 
@@ -198,7 +215,10 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     w.u16(quantizeAim(p.aim));
     w.u8(p.wi);
     w.u8(Math.min(255, p.cooldown));
-    w.u8((p.prevFire ? 1 : 0) | (p.prevSwap ? 2 : 0) | (p.dead ? 4 : 0));
+    w.u8((p.prevFire ? 1 : 0) | (p.prevSwap ? 2 : 0) | (p.dead ? 4 : 0) | (p.prevUse ? 8 : 0));
+    for (let i = 0; i < AMMO_TYPES.length; i++) w.u8(Math.min(255, p.ammo[i]));
+    w.u8(p.burstLeft);
+    w.u8(Math.max(0, p.burstTimer));
     w.u8(p.hp);
     w.u8(p.maxHp);
     w.u8(p.invuln);
@@ -232,6 +252,18 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     w.i16(qVel(b.vx));
     w.i16(qVel(b.vy));
     w.u8(b.owner);
+    w.u8(Math.max(0, PROJECTILE_KINDS.indexOf(b.kind)));
+  }
+
+  w.u8(Math.min(255, items.length));
+  for (const e of items.slice(0, 255)) {
+    w.u32(e.id);
+    const kind = ITEM_KINDS.indexOf(`${e.type}:${e.kind}`);
+    w.u8(kind);
+    w.u8(e.kind === "ammo" ? AMMO_TYPES.indexOf(e.ammo) : e.kind === "weapon" ? weaponIndex(e.weapon) : 0);
+    w.u16(qPos(e.x + e.w / 2));
+    w.u16(qPos(e.y + e.h / 2));
+    w.u8(e.life > 0 && e.life < 180 ? 1 : 0); // about to vanish: blink
   }
 
   w.u8(evs.length);
@@ -242,7 +274,13 @@ export function encodeSnapshot(world, ack, events, focus = null) {
     w.u16(qPos(ev.x ?? 0));
     w.u16(qPos(ev.y ?? 0));
     w.u16(quantizeAim(ev.angle ?? 0));
-    w.u8(ev.weapon ? weaponIndex(ev.weapon) : kindIndex(ev.kind));
+    let aux = 0;
+    if (WEAPON_EVENTS.has(ev.type)) aux = weaponIndex(ev.weapon);
+    else if (ev.type === "beam") aux = Math.min(255, Math.round(ev.len / 2));
+    else if (ev.type === "pickupAmmo") aux = AMMO_TYPES.indexOf(ev.ammo);
+    else if (ev.type === "bulletWall") aux = Math.max(0, PROJECTILE_KINDS.indexOf(ev.kind));
+    else aux = kindIndex(ev.kind);
+    w.u8(aux);
   }
   return w.done();
 }
@@ -279,6 +317,10 @@ export function decodeSnapshot(buf) {
     p.prevFire = !!(flags & 1);
     p.prevSwap = !!(flags & 2);
     p.dead = !!(flags & 4);
+    p.prevUse = !!(flags & 8);
+    p.ammo = AMMO_TYPES.map(() => r.u8());
+    p.burstLeft = r.u8();
+    p.burstTimer = r.u8();
     p.hp = r.u8();
     p.maxHp = r.u8();
     p.invuln = r.u8();
@@ -322,6 +364,32 @@ export function decodeSnapshot(buf) {
       vy: dqVel(r.i16()),
       owner: r.u8(),
     });
+    const b = bullets[bullets.length - 1];
+    b.kind = PROJECTILE_KINDS[r.u8()] ?? "bullet";
+    b.w = b.h = PROJECTILE_SIZE[b.kind] ?? 2;
+  }
+
+  const items = [];
+  for (let i = 0, n = r.u8(); i < n; i++) {
+    const id = r.u32();
+    const [type, kind] = (ITEM_KINDS[r.u8()] ?? "pickup:ammo").split(":");
+    const aux = r.u8();
+    const x = dqPos(r.u16());
+    const y = dqPos(r.u16());
+    const blink = r.u8() === 1;
+    const size = type === "chest" ? [12, 9] : kind === "weapon" ? [12, 12] : [7, 7];
+    items.push({
+      type,
+      kind,
+      id,
+      x: x - size[0] / 2,
+      y: y - size[1] / 2,
+      w: size[0],
+      h: size[1],
+      ammo: kind === "ammo" ? AMMO_TYPES[aux] : undefined,
+      weapon: kind === "weapon" ? WEAPON_IDS[aux] : undefined,
+      blink,
+    });
   }
 
   const events = [];
@@ -331,10 +399,13 @@ export function decodeSnapshot(buf) {
     const owner = r.u8();
     const ev = { type, owner, x: dqPos(r.u16()), y: dqPos(r.u16()), angle: dequantizeAim(r.u16()) };
     const aux = r.u8();
-    if (type === "shot" || type === "swap") ev.weapon = WEAPON_IDS[aux];
+    if (WEAPON_EVENTS.has(type)) ev.weapon = WEAPON_IDS[aux];
+    else if (type === "beam") ev.len = aux * 2;
+    else if (type === "pickupAmmo") ev.ammo = AMMO_TYPES[aux];
+    else if (type === "bulletWall") ev.kind = PROJECTILE_KINDS[aux];
     else ev.kind = ENEMY_KINDS[aux];
     events.push({ tick: evTick, ev });
   }
 
-  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, players, enemies, bullets, events, bytes: buf.byteLength };
+  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, players, items, enemies, bullets, events, bytes: buf.byteLength };
 }

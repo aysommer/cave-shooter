@@ -5,7 +5,11 @@ import { TILE } from "../constants.js";
 import { T_FLOOR, T_WALL } from "./tilemap.js";
 import { generateLevel } from "./generate.js";
 import { BIOME_ENEMIES, GAME_OVER_TICKS, PLAYER_HP } from "../../data/enemies.js";
-import { PLAYER, REVIVE } from "../constants.js";
+import { REVIVE } from "../constants.js";
+import { START_WEAPONS } from "../../data/weapons.js";
+import { spawnChest } from "../entities/pickup.js";
+import { startAmmo } from "../entities/player.js";
+import { CHESTS } from "../../data/loot.js";
 import { spawnEnemy } from "../entities/enemy.js";
 import { rngFloat } from "../../core/rng.js";
 
@@ -46,6 +50,7 @@ export function loadLevel(world, depth) {
     }
   }
   spawnEnemies(world, lvl);
+  for (const c of lvl.chests) spawnChest(world, rngFloat(world.rng) < CHESTS.ammoChestChance ? "ammo" : "weapon", c.x, c.y);
   if (!world.entities.some((e) => e.type === "enemy")) world.level.portal.open = true;
   world.events.push({ type: "levelStart", owner: 255, depth });
 }
@@ -85,9 +90,11 @@ export function restartRun(world) {
     p.dead = false;
     p.hp = p.maxHp = PLAYER_HP;
     p.invuln = 0;
-    p.weapons = [...PLAYER.startWeapons];
+    p.weapons = [...START_WEAPONS];
     p.wi = 0;
+    p.ammo = startAmmo();
     p.cooldown = 0;
+    p.burstLeft = 0;
   }
   loadLevel(world, 1);
 }

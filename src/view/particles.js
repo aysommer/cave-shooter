@@ -132,6 +132,33 @@ export function createParticles(renderer) {
           case "drop":
             r.pixel(x, y - p.z, p.color);
             break;
+          case "beam": {
+            // Laser: bright core, fading glow.
+            const x2 = x + Math.cos(p.angle) * p.len;
+            const y2 = y + Math.sin(p.angle) * p.len;
+            renderer.ctx.globalAlpha = p.life / p.max;
+            r.line(x, y + 1, x2, y2 + 1, "#2f8fb0");
+            r.line(x, y - 1, x2, y2 - 1, "#2f8fb0");
+            r.line(x, y, x2, y2, p.life > p.max / 2 ? "#ffffff" : "#5fe6f0");
+            renderer.ctx.globalAlpha = 1;
+            break;
+          }
+          case "slash": {
+            // Melee swing: an arc of white pixels fading out.
+            const n = 14;
+            for (let i = 0; i <= n; i++) {
+              const a = p.angle - p.arc / 2 + (p.arc * i) / n;
+              const k = p.life / p.max;
+              r.pixel(x + Math.cos(a) * p.radius, y + Math.sin(a) * p.radius, k > 0.5 ? "#ffffff" : "#c8c0d8");
+              if (k > 0.5) r.pixel(x + Math.cos(a) * (p.radius - 2), y + Math.sin(a) * (p.radius - 2), "#c8c0d8");
+            }
+            break;
+          }
+          case "text": {
+            const m = r.measureText(p.text);
+            r.text(p.text, Math.round(x - m.w / 2), Math.round(y - (p.max - p.life) * 0.3), p.color);
+            break;
+          }
           case "casing":
             r.rect(x, y - p.z, 2, 1, p.color);
             break;

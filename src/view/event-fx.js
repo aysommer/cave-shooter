@@ -2,7 +2,7 @@
 // floor decals, sounds, screen shake and hitstop. Local only: nothing here
 // goes over the network, both sides derive it from the same events.
 
-import { WEAPONS } from "../data/weapons.js";
+import { WEAPONS, AMMO } from "../data/weapons.js";
 
 /** Blood (or goo) color per enemy type, and the darker stain it leaves. */
 const BLOOD = {
@@ -24,7 +24,7 @@ const SPARKS = ["#ffd27a", "#fff3b0", "#ff9a3d"];
  * @param {Object<number, number>} o.gunKick
  * @param {object} o.enemySprites
  */
-export function createEventFx({ particles, decals, feedback, audio, gunKick, enemySprites }) {
+export function createEventFx({ particles, decals, feedback, audio, gunKick, enemySprites, chestOpenImg }) {
   let localSlot = 0;
   let listener = { x: 0, y: 0 };
   let hurtFlash = 0;
@@ -37,7 +37,7 @@ export function createEventFx({ particles, decals, feedback, audio, gunKick, ene
     switch (ev.type) {
       case "shot": {
         const w = WEAPONS[ev.weapon];
-        particles.add({ kind: "flash", x: ev.x, y: ev.y, angle: ev.angle, size: w.recoil > 1 ? 8 : 5, life: 3, max: 3 });
+        if (!w.melee) particles.add({ kind: "flash", x: ev.x, y: ev.y, angle: ev.angle, size: w.recoil > 1 ? 8 : 5, life: 3, max: 3 });
         gunKick[ev.owner] = w.recoil > 1 ? 3 : 2;
         if (w.casing) particles.casing(ev.x - Math.cos(ev.angle) * 6, ev.y - Math.sin(ev.angle) * 6, ev.angle, w.casing);
         sound(w.sound, ev, { volume: mine ? 1 : 0.8 });
@@ -49,6 +49,46 @@ export function createEventFx({ particles, decals, feedback, audio, gunKick, ene
       }
       case "swap":
         if (mine) audio?.play("swap", { volume: 0.8 });
+        break;
+      case "noAmmo":
+        if (mine) {
+          audio?.play("noAmmo");
+          particles.add({ kind: "text", x: ev.x, y: ev.y - 16, text: "NO AMMO", color: "#ff5e5e", life: 40, max: 40 });
+        }
+        break;
+      case "swing": {
+        const w = WEAPONS[ev.weapon];
+        particles.add({ kind: "slash", x: ev.x, y: ev.y, angle: ev.angle, arc: w.melee.arc, radius: w.melee.radius, life: 7, max: 7 });
+        break;
+      }
+      case "beam":
+        particles.add({ kind: "beam", x: ev.x, y: ev.y, angle: ev.angle, len: ev.len, life: 6, max: 6 });
+        particles.burst(ev.x + Math.cos(ev.angle) * ev.len, ev.y + Math.sin(ev.angle) * ev.len, 3, ["#5fe6f0", "#ffffff"], 1, 8);
+        break;
+      case "deflect":
+        particles.add({ kind: "ring", x: ev.x, y: ev.y, life: 6, max: 6, r: 6, color: "#ffffff" });
+        sound("deflect", ev);
+        break;
+      case "bounce":
+        particles.burst(ev.x, ev.y, 2, ["#f0b0ff", "#ffffff"], 0.8, 6);
+        sound("bounce", ev, { volume: 0.6 });
+        break;
+      case "chestOpen":
+        decals.stamp(chestOpenImg, ev.x, ev.y);
+        particles.burst(ev.x, ev.y, 10, ["#f2c14e", "#ffffff", "#8a5a34"], 1.5, 16);
+        sound("chestOpen", ev);
+        break;
+      case "pickupAmmo":
+        sound("pickupAmmo", ev);
+        particles.add({ kind: "text", x: ev.x, y: ev.y - 6, text: `+${AMMO[ev.ammo]?.short ?? ""}`, color: AMMO[ev.ammo]?.color ?? "#fff", life: 30, max: 30 });
+        break;
+      case "pickupHealth":
+        sound("pickupHealth", ev);
+        particles.add({ kind: "text", x: ev.x, y: ev.y - 6, text: "+HP", color: "#ff5e5e", life: 30, max: 30 });
+        break;
+      case "pickupWeapon":
+        sound("pickupWeapon", ev);
+        particles.add({ kind: "text", x: ev.x, y: ev.y - 18, text: WEAPONS[ev.weapon]?.name ?? "", color: "#ffffff", life: 45, max: 45 });
         break;
       case "bulletWall":
         particles.burst(ev.x, ev.y, 4, SPARKS, 1.2, 12);

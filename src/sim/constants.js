@@ -18,7 +18,6 @@ export const PLAYER = {
   handY: 0, // gun height relative to the hitbox center (belly height on the chunky heroes)
   barrel: 8, // muzzle distance from the hand
   swapDelay: 8, // ticks before firing after a weapon swap
-  startWeapons: ["pistol", "shotgun", "smg"],
   ghostSpeed: 0.8, // a fallen hero drifts around as a ghost
 };
 

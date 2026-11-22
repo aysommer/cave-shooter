@@ -17,7 +17,7 @@ export function createLobby(root) {
       </form>
       <button class="btn btn-ghost" data-act="solo">Играть одному</button>
       <p class="lobby-status" role="status"></p>
-      <p class="lobby-help">WASD — движение, мышь — прицел, ЛКМ — огонь, Q — сменить оружие, E или колесо — метка «сюда!», Enter — чат, M — звук, F3 — тряска, F1 — отладка, F2 — имитация плохой сети</p>
+      <p class="lobby-help">WASD — движение, мышь — прицел, ЛКМ — огонь, Q — сменить оружие, E — подобрать оружие, G или колесо — метка «сюда!», Enter — чат, M — звук, F3 — тряска, F1 — отладка, F2 — имитация плохой сети</p>
     </div>`;
 
   const status = root.querySelector(".lobby-status");

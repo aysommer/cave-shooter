@@ -49,7 +49,7 @@ const levelKey = (run, depth) => run * 100000 + depth;
 const PREDICTED_EVENTS = new Set(["shot", "bulletWall", "bulletFade", "swap"]);
 
 /** Player fields that the host is authoritative for. */
-const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "weapons", "hp", "maxHp", "invuln", "dead", "revive"];
+const PLAYER_STATE = ["x", "y", "vx", "vy", "wi", "cooldown", "prevFire", "prevSwap", "prevUse", "hp", "maxHp", "invuln", "dead", "revive", "burstLeft", "burstTimer"];
 
 /**
  * @param {object} o
@@ -82,8 +82,10 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
 
   function enterLevel(seed, run, depth, tileChanges = []) {
     local = createWorld(seed, depth, run, { friendlyFire });
-    // The guest never simulates enemies: those come from the host.
+    // The guest never simulates enemies, chests or pickups: those come from
+    // the host. Its own explosions are cosmetic (the host's do the damage).
     local.entities = [];
+    local.predictOnly = true;
     for (const [tx, ty, t] of tileChanges) setTile(local, tx, ty, t);
     const k = key();
     const ready = futureTiles.filter((c) => c.key === k);
@@ -176,6 +178,8 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
     const beforeY = me.y;
     for (const k of PLAYER_STATE) me[k] = server[k];
     me.rng = { s: server.rng.s };
+    me.weapons = [...server.weapons];
+    me.ammo = [...server.ammo];
 
     // Replay what the host has not applied yet. Side effects (bullets,
     // events) go to a throwaway world: they already happened locally.
@@ -260,7 +264,10 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
       out.push({ ...src, w: def.w, h: def.h, x, y, px: x, py: y });
     }
 
-    const size = (bl) => (bl.owner === ENEMY_OWNER ? ENEMY_BULLET.w : BULLET_SIZE);
+    // Chests and pickups do not move: take them from the newest snapshot.
+    for (const it of b.items) out.push({ ...it, px: it.x, py: it.y });
+
+    const size = (bl) => bl.w ?? (bl.owner === ENEMY_OWNER ? ENEMY_BULLET.w : BULLET_SIZE);
     // Bullets fly straight, so a bullet known in `a` can be placed exactly.
     for (const ba of a.bullets) {
       if (ba.owner === slot) continue;
@@ -292,13 +299,37 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
 
   /** Own predicted bullets stop at enemies as they are drawn here. */
   function clipOwnBullets() {
-    if (!remoteEnemies.length) return;
+    if (!remoteEnemies.length) {
+      // Nothing to clip against, but explosive own projectiles still must
+      // not explode locally (handled in bullet.js via predictOnly).
+      return;
+    }
     for (const b of local.entities) {
       if (b.type !== "bullet" || b.dead) continue;
       for (const e of remoteEnemies) {
-        if (overlaps(b, e)) {
-          b.dead = true;
-          local.events.push({ type: "bulletWall", owner: slot, x: b.x + b.w / 2, y: b.y + b.h / 2 });
+        if (!overlaps(b, e) || b.hits?.includes(e.id)) continue;
+        if (b.pierce > 0) {
+          // Bolts fly on; remember the target so it is not "hit" twice.
+          b.pierce--;
+          b.hits.push(e.id);
+          continue;
+        }
+        b.dead = true;
+        // Rockets and grenades: the host's explosion arrives as an event.
+        if (!b.explosion) local.events.push({ type: "bulletWall", owner: slot, x: b.x + b.w / 2, y: b.y + b.h / 2 });
+        break;
+      }
+    }
+    // Own laser beams stop at the first enemy drawn on this screen.
+    for (const ev of local.events) {
+      if (ev.type !== "beam") continue;
+      const ux = Math.cos(ev.angle);
+      const uy = Math.sin(ev.angle);
+      for (let d = 0; d < ev.len; d += 2) {
+        const x = ev.x + ux * d;
+        const y = ev.y + uy * d;
+        if (remoteEnemies.some((e) => x >= e.x && x < e.x + e.w && y >= e.y && y < e.y + e.h)) {
+          ev.len = d;
           break;
         }
       }

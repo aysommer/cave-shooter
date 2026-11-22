@@ -56,7 +56,7 @@ function sendSocial(msg) {
 }
 
 function socialKeys() {
-  if (input.consumePressed("KeyE") || input.consumePressed("Mouse1")) {
+  if (input.consumePressed("KeyG") || input.consumePressed("Mouse1")) {
     const now = performance.now();
     if (now - lastPingAt > 500) {
       lastPingAt = now;

@@ -2,6 +2,7 @@
 
 import { ENEMIES, PLAYER_INVULN } from "../data/enemies.js";
 import { blast } from "./level/level.js";
+import { rollDrop } from "./entities/pickup.js";
 
 export const centerX = (e) => e.x + e.w / 2;
 export const centerY = (e) => e.y + e.h / 2;
@@ -52,13 +53,14 @@ export function killEnemy(world, e, from = -1) {
   world.events.push({ type: "enemyDie", owner: from, kind: e.kind, x: centerX(e), y: centerY(e) });
   const def = ENEMIES[e.kind];
   if (def.explosion) explode(world, centerX(e), centerY(e), def.explosion);
+  rollDrop(world, centerX(e), centerY(e), from);
 }
 
 /**
  * Explosion: damages players and enemies in the radius (with falloff-free
  * damage, knockback away from the center) and breaks walls.
  */
-export function explode(world, x, y, { radius, damage, wallRadius }) {
+export function explode(world, x, y, { radius, damage, wallRadius }, from = -1) {
   world.events.push({ type: "explosion", owner: 255, x, y });
   for (const e of world.entities) {
     if (e.dead || (e.type !== "player" && e.type !== "enemy")) continue;
@@ -69,7 +71,7 @@ export function explode(world, x, y, { radius, damage, wallRadius }) {
     const kx = d > 0 ? dx / d : 0;
     const ky = d > 0 ? dy / d : 0;
     if (e.type === "player") damagePlayer(world, e, damage, kx, ky);
-    else damageEnemy(world, e, damage + 1, kx * 3, ky * 3);
+    else damageEnemy(world, e, damage + 1, kx * 3, ky * 3, from);
   }
   if (wallRadius) blast(world, x, y, wallRadius);
 }

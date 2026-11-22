@@ -13,6 +13,40 @@ export const SOUNDS = {
     { wave: "noise", freq: 1400, freqEnd: 90, dur: 0.3, volume: 0.7, lowpass: 0.5 },
     { wave: "square", freq: 220, freqEnd: 55, dur: 0.22, duty: 0.5, volume: 0.35 },
   ],
+  sniper: [
+    { wave: "square", freq: 300, freqEnd: 60, dur: 0.25, duty: 0.5, volume: 0.45 },
+    { wave: "noise", freq: 6000, freqEnd: 400, dur: 0.18, volume: 0.45 },
+  ],
+  laser: [
+    { wave: "saw", freq: 1800, freqEnd: 300, dur: 0.14, volume: 0.25 },
+    { wave: "sine", freq: 900, freqEnd: 200, dur: 0.12, volume: 0.25 },
+  ],
+  bouncer: [{ wave: "triangle", freq: 700, freqEnd: 1400, dur: 0.09, volume: 0.3 }],
+  launcher: [
+    { wave: "noise", freq: 400, freqEnd: 150, dur: 0.2, volume: 0.4, lowpass: 0.4 },
+    { wave: "square", freq: 160, freqEnd: 90, dur: 0.12, duty: 0.5, volume: 0.25 },
+  ],
+  crossbow: [
+    { wave: "triangle", freq: 220, freqEnd: 900, dur: 0.06, volume: 0.35 },
+    { wave: "noise", freq: 3000, freqEnd: 2000, dur: 0.05, volume: 0.15 },
+  ],
+  swing: [{ wave: "noise", freq: 800, freqEnd: 2400, dur: 0.12, volume: 0.35, lowpass: 0.5 }],
+  deflect: [{ wave: "square", freq: 1500, freqEnd: 2400, dur: 0.08, duty: 0.3, volume: 0.3 }],
+  bounce: [{ wave: "triangle", freq: 1200, freqEnd: 900, dur: 0.04, volume: 0.15 }],
+  noAmmo: [{ wave: "square", freq: 180, dur: 0.05, duty: 0.2, volume: 0.25 }],
+  pickupWeapon: [
+    { wave: "square", freq: 500, freqEnd: 700, dur: 0.06, duty: 0.3, volume: 0.3 },
+    { wave: "square", freq: 800, freqEnd: 1000, dur: 0.08, duty: 0.3, volume: 0.25, delay: 0.06 },
+  ],
+  pickupAmmo: [{ wave: "triangle", freq: 900, freqEnd: 1500, dur: 0.07, volume: 0.3 }],
+  pickupHealth: [
+    { wave: "sine", freq: 600, freqEnd: 900, dur: 0.1, volume: 0.35 },
+    { wave: "sine", freq: 900, freqEnd: 1300, dur: 0.12, volume: 0.3, delay: 0.08 },
+  ],
+  chestOpen: [
+    { wave: "noise", freq: 900, freqEnd: 300, dur: 0.12, volume: 0.25 },
+    { wave: "triangle", freq: 500, freqEnd: 1000, dur: 0.2, volume: 0.25, delay: 0.05 },
+  ],
   swap: [{ wave: "square", freq: 900, freqEnd: 1300, dur: 0.05, duty: 0.25, volume: 0.2 }],
   bulletWall: [{ wave: "noise", freq: 5000, freqEnd: 1500, dur: 0.035, volume: 0.12 }],
   enemyShot: [
@@ -58,4 +92,4 @@ export const SOUNDS = {
 };
 
 /** Minimum time between two plays of the same sound (ms), to avoid walls of noise. */
-export const MIN_GAP_MS = { bulletWall: 40, hit: 30, smg: 30, enemyShot: 40 };
+export const MIN_GAP_MS = { bulletWall: 40, hit: 30, smg: 30, enemyShot: 40, bounce: 40, laser: 30, noAmmo: 120 };

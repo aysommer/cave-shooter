@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "signal": "node server/signal/index.js",
-    "test": "node scripts/sim-determinism.mjs && node scripts/level-test.mjs && node scripts/combat-test.mjs && node scripts/audio-test.mjs && node scripts/netcode-test.mjs",
+    "test": "node scripts/sim-determinism.mjs && node scripts/level-test.mjs && node scripts/combat-test.mjs && node scripts/weapons-test.mjs && node scripts/audio-test.mjs && node scripts/netcode-test.mjs",
     "postinstall": "npm --prefix server/signal ci --omit=dev --no-audit --no-fund"
   },
   "devDependencies": {
