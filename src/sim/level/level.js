@@ -100,6 +100,7 @@ export function restartRun(world) {
   world.phase = "play";
   world.choose = null;
   world.victory = 0;
+  world.runTicks = 0;
   for (const p of world.entities) {
     if (p.type !== "player") continue;
     p.dead = false;

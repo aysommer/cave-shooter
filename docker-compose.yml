@@ -1,0 +1,94 @@
+# Production: everything the game needs on one VPS.
+#   web    — the game client (nginx)
+#   signal — PeerJS signaling + temporary TURN credentials
+#   turn   — coturn relay for players behind strict NAT
+#   caddy  — HTTPS (automatic certificates), routes / and /peerjs
+#
+# Setup: copy deploy/.env.example to .env, fill it in, then
+#   docker compose up -d            # uses images from GitHub Container Registry
+#   docker compose up -d --build    # or builds them on the server
+# Step by step: docs/DEPLOY.md
+
+name: cave-shooter
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    image: ${REGISTRY:-ghcr.io/aysommer}/cave-shooter-web:${TAG:-latest}
+    build: .
+    restart: unless-stopped
+    logging: *logging
+
+  signal:
+    image: ${REGISTRY:-ghcr.io/aysommer}/cave-shooter-signal:${TAG:-latest}
+    build: ./server/signal
+    environment:
+      PORT: "9000"
+      PROXIED: "true"
+      TURN_URLS: "turn:${DOMAIN}:3478?transport=udp,turn:${DOMAIN}:3478?transport=tcp"
+      TURN_SECRET: ${TURN_SECRET:?set TURN_SECRET in .env}
+    restart: unless-stopped
+    logging: *logging
+
+  caddy:
+    image: caddy:2.8-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - signal
+    restart: unless-stopped
+    logging: *logging
+
+  turn:
+    image: coturn/coturn:4.6.3
+    # Host networking: Docker port mapping copes badly with UDP relay ranges.
+    # Open in the firewall: 3478/tcp, 3478/udp, 49160-49200/udp.
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49200
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --realm=${DOMAIN}
+      - --external-ip=${PUBLIC_IP:?set PUBLIC_IP in .env}
+      # Bind relays to one address (otherwise coturn may pick Docker's own
+      # bridges, which the outside world cannot reach).
+      - --relay-ip=${RELAY_IP:-${PUBLIC_IP}}
+      - --fingerprint
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --no-multicast-peers
+      - --stale-nonce=600
+      - --total-quota=200
+      # Never relay into private networks (protects the VPS's own network).
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

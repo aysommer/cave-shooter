@@ -1,0 +1,6 @@
+node_modules
+server/signal/node_modules
+dist
+.git
+.env
+*.log

@@ -1,8 +1,9 @@
-// Player preferences kept in this browser (localStorage). Menus come in
-// stage 10; for now: M toggles sound, F3 toggles screen shake.
+// Player preferences kept in this browser (localStorage): name, volumes,
+// screen shake. Changed in the settings panel (lobby or pause menu);
+// M and F3 are shortcuts for sound and shake.
 
 const KEY = "caveShooterSettings";
-const DEFAULTS = { muted: false, volume: 0.7, shake: true };
+const DEFAULTS = { name: "", muted: false, volume: 0.7, music: 0.5, shake: true };
 
 export function loadSettings() {
   try {
@@ -18,4 +19,9 @@ export function saveSettings(s) {
   } catch {
     /* private mode etc. */
   }
+}
+
+/** Display name: what the player typed, or "Игрок". */
+export function playerName(s) {
+  return (s.name ?? "").trim().slice(0, 16) || "Игрок";
 }

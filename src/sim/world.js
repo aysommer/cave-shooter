@@ -41,6 +41,7 @@ export function createWorld(seed, depth = 1, run = 0, { friendlyFire = false } =
     phase: "play", // play | choose (mutations between levels) | victory
     choose: null, // { timer, nextDepth } while choosing
     victory: 0, // ticks left on the victory screen
+    runTicks: 0, // time played in this run (for the summary)
     tick: 0,
     rng: createRng(seed),
     nextId: 1,
@@ -84,6 +85,7 @@ export function step(world, inputs) {
   world.events = [];
   // Between levels (choosing mutations, victory) the world stands still.
   if (world.phase !== "play") return;
+  if (!world.gameOver) world.runTicks++;
 
   const hasEnemies = world.entities.some((e) => e.type === "enemy");
   if (hasEnemies && (!world.nav || world.tick - world.nav.tick >= NAV_EVERY)) {

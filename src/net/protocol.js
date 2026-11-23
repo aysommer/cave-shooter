@@ -15,7 +15,7 @@ import { VIEW_W, VIEW_H } from "../sim/constants.js";
 import { MUTATION_IDS } from "../data/mutations.js";
 import { HERO_IDS } from "../data/heroes.js";
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 export const MSG_INPUT = 1;
 export const MSG_SNAPSHOT = 2;
@@ -226,6 +226,7 @@ export function encodeSnapshot(world, ack, events, focus = null) {
   const boss = world.entities.find((e) => e.boss && !e.dead);
   w.u8(boss ? kindIndex(boss.kind) : 255);
   w.u8(boss ? Math.round((Math.max(0, boss.hp) / boss.maxHp) * 255) : 0);
+  w.u32(world.runTicks);
 
   w.u8(players.length);
   for (const p of players) {
@@ -343,6 +344,7 @@ export function decodeSnapshot(buf) {
   const bossKind = r.u8();
   const bossHp = r.u8() / 255;
   const boss = bossKind === 255 ? null : { kind: ENEMY_KINDS[bossKind], hpFrac: bossHp };
+  const runTicks = r.u32();
 
   const players = [];
   for (let i = 0, n = r.u8(); i < n; i++) {
@@ -475,5 +477,5 @@ export function decodeSnapshot(buf) {
     events.push({ tick: evTick, ev });
   }
 
-  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, xp, xpLevel, pendingPicks, phase, phaseTimer, boss, players, items, enemies, bullets, events, bytes: buf.byteLength };
+  return { tick, ack, run, depth, portalCharge, portalOpen, enemiesAlive, gameOver, score, kills, xp, xpLevel, pendingPicks, phase, phaseTimer, boss, runTicks, players, items, enemies, bullets, events, bytes: buf.byteLength };
 }

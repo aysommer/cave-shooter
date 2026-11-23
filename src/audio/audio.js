@@ -4,6 +4,7 @@
 
 import { renderSound } from "./synth.js";
 import { SOUNDS, MIN_GAP_MS } from "./sounds.js";
+import { createMusic } from "./music.js";
 
 const HEARING_RANGE = 380; // px; beyond this sounds are very quiet
 const MAX_VOICES = 24;
@@ -11,6 +12,9 @@ const MAX_VOICES = 24;
 export function createAudio(settings) {
   let ctx = null;
   let master = null;
+  let sfx = null;
+  let music = null;
+  let wantedTheme = "";
   const buffers = {};
   const lastPlayed = {};
   let voices = 0;
@@ -25,8 +29,13 @@ export function createAudio(settings) {
     comp.threshold.value = -12;
     comp.ratio.value = 6;
     master = ctx.createGain();
-    master.gain.value = settings.muted ? 0 : settings.volume;
+    master.gain.value = settings.muted ? 0 : 1;
     master.connect(comp).connect(ctx.destination);
+    sfx = ctx.createGain();
+    sfx.gain.value = settings.volume;
+    sfx.connect(master);
+    music = createMusic(ctx, master);
+    if (wantedTheme) music.play(wantedTheme, settings.music);
     for (const [name, layers] of Object.entries(SOUNDS)) buffers[name] = renderSound(ctx, layers);
   }
 
@@ -73,7 +82,7 @@ export function createAudio(settings) {
         p.pan.value = pan;
         node = node.connect(p);
       }
-      node.connect(master);
+      node.connect(sfx);
       voices++;
       src.onended = () => voices--;
       src.start();
@@ -85,7 +94,16 @@ export function createAudio(settings) {
     },
 
     applySettings() {
-      if (master) master.gain.value = settings.muted ? 0 : settings.volume;
+      if (!master) return;
+      master.gain.value = settings.muted ? 0 : 1;
+      sfx.gain.value = settings.volume;
+      music.setVolume(settings.music);
+    },
+
+    /** Background music theme: "menu", a biome id, "boss", "victory" or "". */
+    music(theme) {
+      wantedTheme = theme;
+      if (music && ctx.state === "running") music.play(theme, settings.music);
     },
   };
 }

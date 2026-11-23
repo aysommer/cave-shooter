@@ -95,4 +95,4 @@ export const PLAYER_HP = 8;
 /** Invulnerability after taking a hit (ticks). */
 export const PLAYER_INVULN = 40;
 /** Ticks between "everyone is dead" and the run restarting. */
-export const GAME_OVER_TICKS = 180;
+export const GAME_OVER_TICKS = 360;

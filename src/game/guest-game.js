@@ -426,6 +426,7 @@ export function createGuestGame({ session, input, view, onSocial = () => {} }) {
         choose: latest?.phase === "choose" ? { timer: latest.phaseTimer } : null,
         victory: latest?.phase === "victory" ? latest.phaseTimer : 0,
         boss: latest?.boss ?? null,
+        runTicks: latest?.runTicks ?? 0,
         notice: noticeText(),
       };
       lastDisplay = display;

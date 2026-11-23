@@ -1,0 +1,26 @@
+# HTTPS front door. Caddy gets and renews the certificate for {$DOMAIN}
+# automatically (Let's Encrypt). For a local test set DOMAIN=localhost:
+# Caddy then uses its own local certificate authority.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Signaling (WebSocket) and ICE/TURN credentials
+	handle /peerjs* {
+		reverse_proxy signal:9000
+	}
+	handle /ice {
+		reverse_proxy signal:9000
+	}
+
+	# The game client
+	handle {
+		reverse_proxy web:80
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}
